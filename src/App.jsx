@@ -25,12 +25,14 @@ import {
   LogOut,
   MapPin,
   MessageSquare,
+  Palette,
   Plus,
   Radio,
   RefreshCw,
   RotateCcw,
   Search,
   Send,
+  Settings,
   Shield,
   ShieldAlert,
   ShieldCheck,
@@ -45,6 +47,7 @@ import {
   Zap
 } from 'lucide-react'
 import AdminLoginModal from './components/AdminLoginModal'
+import SettingsModal from './components/SettingsModal'
 import BroadcastBanner from './components/BroadcastBanner'
 import AnalyticsStudio from './components/AnalyticsStudio'
 import AuditExplorer from './components/AuditExplorer'
@@ -109,6 +112,21 @@ export default function App() {
   const [adminNote, setAdminNote] = useState('')
   const [backendOnline, setBackendOnline] = useState(true)
   const [showLoginModal, setShowLoginModal] = useState(false)
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
+
+  // 3 Professional Themes: 'black-white', 'white-black', 'professional-color'
+  const [currentTheme, setCurrentTheme] = useState(() => {
+    return localStorage.getItem('kairos_theme') || 'black-white'
+  })
+
+  // Set of newly arrived ticket IDs for subtle professional highlight
+  const [newTicketIds, setNewTicketIds] = useState(() => new Set())
+
+  // Persist and apply theme globally
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', currentTheme)
+    localStorage.setItem('kairos_theme', currentTheme)
+  }, [currentTheme])
 
   // Student Public Grievance Tracking State
   const [trackIdInput, setTrackIdInput] = useState('')
@@ -154,39 +172,6 @@ export default function App() {
     showNotice('Administrator session terminated. Switched to public student view.')
   }
 
-  // Load tickets from FastAPI backend (Protected: requires admin token)
-  const fetchTickets = useCallback(async () => {
-    if (!adminToken) {
-      setTickets([])
-      return
-    }
-    try {
-      const res = await fetch('/api/tickets', {
-        headers: { 'Authorization': `Bearer ${adminToken}` }
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setTickets(data)
-        if (data.length > 0) {
-          setSelectedId((curr) => (!curr || !data.find(t => t.id === curr) ? data[0].id : curr))
-        }
-        setBackendOnline(true)
-      } else if (res.status === 401) {
-        // Token invalid or expired
-        setAdminToken('')
-        setAdminUser(null)
-        localStorage.removeItem('kairos_admin_token')
-        localStorage.removeItem('kairos_admin_user')
-        showNotice('Admin session expired. Please sign in again.')
-      } else {
-        throw new Error('Backend returned status ' + res.status)
-      }
-    } catch (err) {
-      console.warn('Backend API unavailable:', err)
-      setBackendOnline(false)
-    }
-  }, [adminToken])
-
   // Load analytics (Protected)
   const fetchAnalytics = useCallback(async () => {
     if (!adminToken) {
@@ -205,6 +190,54 @@ export default function App() {
       console.warn('Analytics endpoint offline:', err)
     }
   }, [adminToken])
+
+  // Load tickets from FastAPI backend (Protected: requires admin token)
+  const fetchTickets = useCallback(async () => {
+    if (!adminToken) {
+      setTickets([])
+      return
+    }
+    try {
+      const res = await fetch('/api/tickets', {
+        headers: { 'Authorization': `Bearer ${adminToken}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setTickets((curr) => {
+          if (curr && curr.length > 0) {
+            const existingIds = new Set(curr.map((t) => t.id))
+            const incomingNew = data.filter((t) => !existingIds.has(t.id)).map((t) => t.id)
+            if (incomingNew.length > 0) {
+              setNewTicketIds((prev) => {
+                const next = new Set(prev)
+                incomingNew.forEach((id) => next.add(id))
+                return next
+              })
+              setSelectedId(incomingNew[0])
+              fetchAnalytics()
+            }
+          }
+          return data
+        })
+        if (data.length > 0) {
+          setSelectedId((curr) => (!curr || !data.find(t => t.id === curr) ? data[0].id : curr))
+        }
+        setBackendOnline(true)
+      } else if (res.status === 401) {
+        // Token invalid or expired
+        setAdminToken('')
+        setAdminUser(null)
+        localStorage.removeItem('kairos_admin_token')
+        localStorage.removeItem('kairos_admin_user')
+        showNotice('Admin session expired. Please sign in again.')
+      } else {
+        throw new Error('Backend returned status ' + res.status)
+      }
+    } catch (err) {
+      console.warn('Backend API unavailable:', err)
+      setBackendOnline(false)
+    }
+  }, [adminToken, fetchAnalytics])
 
   // Load broadcasts (Public emergency alerts)
   const fetchBroadcasts = useCallback(async () => {
@@ -242,6 +275,16 @@ export default function App() {
     fetchDbStatus()
   }, [fetchTickets, fetchAnalytics, fetchBroadcasts, fetchDbStatus, adminToken])
 
+  // Real-time Operations Hub auto-sync polling: pulls new tickets automatically
+  useEffect(() => {
+    if (!adminToken) return
+    const interval = setInterval(() => {
+      fetchTickets()
+      fetchAnalytics()
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [adminToken, fetchTickets, fetchAnalytics])
+
   // Public Student Ticket Tracking Handler
   const handleTrackTicket = async (e) => {
     if (e) e.preventDefault()
@@ -270,7 +313,7 @@ export default function App() {
   const selected = tickets.find((ticket) => ticket.id === selectedId) || tickets[0] || null
 
   const shown = useMemo(() => {
-    return tickets.filter((ticket) => {
+    const filtered = tickets.filter((ticket) => {
       const matchStatus = filters.status === 'All' || ticket.status === filters.status
       const matchPriority = filters.priority === 'All' || ticket.priority === filters.priority
       const matchDept = filters.department === 'All' || ticket.department === filters.department
@@ -282,7 +325,15 @@ export default function App() {
         ticket.description.toLowerCase().includes(filters.search.toLowerCase())
       return matchStatus && matchPriority && matchDept && matchLoc && matchSearch
     })
-  }, [tickets, filters])
+
+    // Float newly created/arrived tickets to the very top, while preserving relative order
+    return [...filtered].sort((a, b) => {
+      const aIsNew = newTicketIds.has(a.id) ? 1 : 0
+      const bIsNew = newTicketIds.has(b.id) ? 1 : 0
+      if (aIsNew !== bIsNew) return bIsNew - aIsNew
+      return 0
+    })
+  }, [tickets, filters, newTicketIds])
 
   // Metrics summary
   const metrics = useMemo(() => {
@@ -601,7 +652,8 @@ export default function App() {
       })
       if (res.ok) {
         const created = await res.json()
-        setTickets((curr) => [created, ...curr])
+        setTickets((curr) => [created, ...curr.filter(t => t.id !== created.id)])
+        setNewTicketIds((prev) => new Set([...prev, created.id]))
         setSelectedId(created.id)
         showNotice(`${created.id} submitted and routed to ${created.department}!`)
         return
@@ -645,7 +697,8 @@ export default function App() {
           }
         ]
       }
-      setTickets((curr) => [fallbackTicket, ...curr])
+      setTickets((curr) => [fallbackTicket, ...curr.filter(t => t.id !== fallbackTicket.id)])
+      setNewTicketIds((prev) => new Set([...prev, fallbackTicket.id]))
       setSelectedId(mockId)
       showNotice(`${mockId} submitted and routed to ${payload.department}`)
     } finally {
@@ -709,7 +762,7 @@ export default function App() {
           KAI<span className="brand-accent">ROS</span>
         </div>
 
-        {/* User Profile / Admin Card */}
+        {/* User Profile / Settings & Appearance Area */}
         <div className="sidebar-auth-card">
           {adminUser ? (
             <div className="user-profile-badge">
@@ -719,6 +772,9 @@ export default function App() {
                 <span>{adminUser.role}</span>
                 <small className="badge-dept">{adminUser.department}</small>
               </div>
+              <button className="sidebar-settings-btn" onClick={() => setShowSettingsModal(true)} title="Settings & Appearance">
+                <Settings size={14} />
+              </button>
               <button className="auth-logout-btn" onClick={handleLogout} title="Sign Out">
                 <LogOut size={13} />
               </button>
@@ -728,6 +784,9 @@ export default function App() {
               <div className="guest-info">
                 <Shield size={14} />
                 <span>Guest / Student Mode</span>
+                <button className="sidebar-settings-btn" onClick={() => setShowSettingsModal(true)} title="Settings & Appearance">
+                  <Settings size={14} />
+                </button>
               </div>
               <button className="sidebar-login-btn" onClick={() => setShowLoginModal(true)}>
                 <KeyRound size={12} />
@@ -735,6 +794,46 @@ export default function App() {
               </button>
             </div>
           )}
+
+          {/* Theme Selector in Settings/Profile Area */}
+          <div className="sidebar-theme-quick-bar">
+            <div className="sidebar-theme-header">
+              <span>Theme</span>
+              <button type="button" onClick={() => setShowSettingsModal(true)} title="Open Full Settings & Profile Modal">
+                <Palette size={11} />
+                <span>Settings</span>
+              </button>
+            </div>
+            <div className="sidebar-theme-chips">
+              <button
+                type="button"
+                className={`theme-chip-btn ${currentTheme === 'black-white' ? 'active' : ''}`}
+                onClick={() => setCurrentTheme('black-white')}
+                title="Black & White (Current Default Theme)"
+              >
+                <span className="theme-dot-indicator" style={{ background: '#ffffff' }} />
+                <span>B&W</span>
+              </button>
+              <button
+                type="button"
+                className={`theme-chip-btn ${currentTheme === 'white-black' ? 'active' : ''}`}
+                onClick={() => setCurrentTheme('white-black')}
+                title="White & Black (Light / Inverted Theme)"
+              >
+                <span className="theme-dot-indicator" style={{ background: '#09090b' }} />
+                <span>W&B</span>
+              </button>
+              <button
+                type="button"
+                className={`theme-chip-btn ${currentTheme === 'professional-color' ? 'active' : ''}`}
+                onClick={() => setCurrentTheme('professional-color')}
+                title="Professional Color (Enterprise Navy & Slate)"
+              >
+                <span className="theme-dot-indicator" style={{ background: '#3b82f6' }} />
+                <span>Color</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <p className="workspace-label">Navigation</p>
@@ -1122,11 +1221,12 @@ export default function App() {
                       const isBreached = ticket.is_breached || (ticket.due && ticket.due.includes('breached'))
                       const isSelected = selected?.id === ticket.id
                       const isChecked = selectedTicketIds.includes(ticket.id)
+                      const isNew = newTicketIds.has(ticket.id)
 
                       return (
                         <button
                           key={ticket.id}
-                          className={`ticket-row-3d ${isSelected ? 'selected' : ''} ${isBreached ? 'breached' : ''}`}
+                          className={`ticket-row-3d ${isSelected ? 'selected' : ''} ${isBreached ? 'breached' : ''} ${isNew ? 'new-arrival' : ''}`}
                           onClick={() => setSelectedId(ticket.id)}
                         >
                           <input
@@ -1142,6 +1242,11 @@ export default function App() {
                               <strong>
                                 {ticket.id}: {ticket.title}
                               </strong>
+                              {isNew && (
+                                <span className="badge-new-ticket" title="Newly created complaint awaiting review">
+                                  <span className="pulsing-dot" /> NEW TICKET
+                                </span>
+                              )}
                             </div>
                             <small>
                               <MapPin size={11} /> {ticket.location}
@@ -1552,6 +1657,16 @@ export default function App() {
         onLoginSuccess={handleLoginSuccess}
         currentAdmin={adminUser}
         onPasswordChanged={() => showNotice('Administrator password updated successfully')}
+      />
+
+      {/* Settings & Profile Appearance Modal */}
+      <SettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        currentTheme={currentTheme}
+        onSelectTheme={setCurrentTheme}
+        adminUser={adminUser}
+        dbStatus={dbStatus}
       />
 
       {/* Real-time Toast Notifications */}
