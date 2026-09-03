@@ -4585,6 +4585,17 @@ body {
   gap: 8px;
 }
 
+.sidebar-theme-quick-bar.near-sla {
+  margin-top: 14px;
+  padding: 12px 0 0 0;
+  border-top: 1px solid var(--line-faint);
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+}
+
 .sidebar-theme-header {
   display: flex;
   align-items: center;

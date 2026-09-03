@@ -794,46 +794,6 @@ export default function App() {
               </button>
             </div>
           )}
-
-          {/* Theme Selector in Settings/Profile Area */}
-          <div className="sidebar-theme-quick-bar">
-            <div className="sidebar-theme-header">
-              <span>Theme</span>
-              <button type="button" onClick={() => setShowSettingsModal(true)} title="Open Full Settings & Profile Modal">
-                <Palette size={11} />
-                <span>Settings</span>
-              </button>
-            </div>
-            <div className="sidebar-theme-chips">
-              <button
-                type="button"
-                className={`theme-chip-btn ${currentTheme === 'black-white' ? 'active' : ''}`}
-                onClick={() => setCurrentTheme('black-white')}
-                title="Black & White (Current Default Theme)"
-              >
-                <span className="theme-dot-indicator" style={{ background: '#ffffff' }} />
-                <span>B&W</span>
-              </button>
-              <button
-                type="button"
-                className={`theme-chip-btn ${currentTheme === 'white-black' ? 'active' : ''}`}
-                onClick={() => setCurrentTheme('white-black')}
-                title="White & Black (Light / Inverted Theme)"
-              >
-                <span className="theme-dot-indicator" style={{ background: '#09090b' }} />
-                <span>W&B</span>
-              </button>
-              <button
-                type="button"
-                className={`theme-chip-btn ${currentTheme === 'professional-color' ? 'active' : ''}`}
-                onClick={() => setCurrentTheme('professional-color')}
-                title="Professional Color (Enterprise Navy & Slate)"
-              >
-                <span className="theme-dot-indicator" style={{ background: '#3b82f6' }} />
-                <span>Color</span>
-              </button>
-            </div>
-          </div>
         </div>
 
         <p className="workspace-label">Navigation</p>
@@ -887,6 +847,46 @@ export default function App() {
           </div>
           <div className="sidebar-meter">
             <b style={{ width: `${metrics.sla_compliance_rate || 94.2}%` }} />
+          </div>
+
+          {/* Theme Selector placed directly near SLA Adherence Rate */}
+          <div className="sidebar-theme-quick-bar near-sla">
+            <div className="sidebar-theme-header">
+              <span>Theme Selector</span>
+              <button type="button" onClick={() => setShowSettingsModal(true)} title="Open Full Settings & Profile Modal">
+                <Palette size={11} />
+                <span>Settings</span>
+              </button>
+            </div>
+            <div className="sidebar-theme-chips">
+              <button
+                type="button"
+                className={`theme-chip-btn ${currentTheme === 'black-white' ? 'active' : ''}`}
+                onClick={() => setCurrentTheme('black-white')}
+                title="Black & White (Current Default Theme)"
+              >
+                <span className="theme-dot-indicator" style={{ background: '#ffffff' }} />
+                <span>B&W</span>
+              </button>
+              <button
+                type="button"
+                className={`theme-chip-btn ${currentTheme === 'white-black' ? 'active' : ''}`}
+                onClick={() => setCurrentTheme('white-black')}
+                title="White & Black (Light / Inverted Theme)"
+              >
+                <span className="theme-dot-indicator" style={{ background: '#09090b' }} />
+                <span>W&B</span>
+              </button>
+              <button
+                type="button"
+                className={`theme-chip-btn ${currentTheme === 'professional-color' ? 'active' : ''}`}
+                onClick={() => setCurrentTheme('professional-color')}
+                title="Professional Color (Enterprise Navy & Slate)"
+              >
+                <span className="theme-dot-indicator" style={{ background: '#3b82f6' }} />
+                <span>Color</span>
+              </button>
+            </div>
           </div>
         </div>
 
