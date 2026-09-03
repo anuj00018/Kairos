@@ -3,7 +3,7 @@ import urllib.error
 import json
 import sys
 
-BASE = 'http://127.0.0.1:8000'
+BASE = sys.argv[1].rstrip('/') if len(sys.argv) > 1 else 'http://127.0.0.1:8000'
 
 def request(method, path, body=None, token=None):
     headers = {'Content-Type': 'application/json'}
