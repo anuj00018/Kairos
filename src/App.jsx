@@ -11,6 +11,7 @@ import {
   Cpu,
   Database,
   Download,
+  Edit3,
   Eye,
   FileImage,
   Filter,
@@ -101,7 +102,25 @@ export default function App() {
   const [tickets, setTickets] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [filters, setFilters] = useState({ status: 'All', priority: 'All', department: 'All', location: 'All', search: '' })
-  const [form, setForm] = useState({ description: '', location: LOCATIONS[0], category: '', priority: '', department: '' })
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    location: LOCATIONS[0],
+    category: 'Infrastructure',
+    priority: 'Medium',
+    department: 'Facilities',
+    recommended_action: 'Inspect on-site'
+  })
+  const [manualLocation, setManualLocation] = useState(false)
+  const [showManualSection, setShowManualSection] = useState(false)
+  const [manualOverrides, setManualOverrides] = useState({
+    title: false,
+    category: false,
+    priority: false,
+    department: false,
+    location: false,
+    recommended_action: false
+  })
   const [preview, setPreview] = useState('')
   const [notice, setNotice] = useState('')
   const [analytics, setAnalytics] = useState(null)
@@ -531,15 +550,21 @@ export default function App() {
         setTriagePreview(triageData)
         setForm((prev) => ({
           ...prev,
+          title: prev.title || triageData.title,
           category: triageData.category,
           priority: triageData.priority,
-          department: triageData.department
+          department: triageData.department,
+          recommended_action: triageData.recommended_action || prev.recommended_action
         }))
-        showNotice(`AI classified as ${triageData.category} (${triageData.priority})`)
+        setShowManualSection(true)
+        showNotice(`AI classified as ${triageData.category} (${triageData.priority}) — review or edit manually below!`)
+        setIsTriaging(false)
         return
       }
     } catch (e) {
       console.warn('AI Triage endpoint fallback:', e)
+      showNotice('AI triage unavailable. Manual classification enabled.')
+      setShowManualSection(true)
     }
 
     // Client Heuristic Fallback
@@ -587,8 +612,16 @@ export default function App() {
     }
 
     setTriagePreview(previewResult)
-    setForm((prev) => ({ ...prev, category: cat, priority: pri, department: dept }))
-    showNotice(`AI classified as ${cat} (${pri})`)
+    setForm((prev) => ({
+      ...prev,
+      title: prev.title || previewResult.title,
+      category: cat,
+      priority: pri,
+      department: dept,
+      recommended_action: action
+    }))
+    setShowManualSection(true)
+    showNotice(`Classified as ${cat} (${pri}) — review or edit manually below!`)
     setIsTriaging(false)
   }
 
@@ -631,17 +664,25 @@ export default function App() {
     if (!form.description || form.description.length < 5) return
 
     setIsSubmitting(true)
+    const finalTitle = form.title?.trim() || triagePreview?.title || form.description.slice(0, 55)
+    const finalLocation = form.location?.trim() || LOCATIONS[0]
+    const finalCategory = form.category || triagePreview?.category || 'Infrastructure'
+    const finalPriority = form.priority || triagePreview?.priority || 'Medium'
+    const finalDepartment = form.department || triagePreview?.department || 'Facilities'
+    const finalAction = form.recommended_action?.trim() || triagePreview?.recommended_action || 'Inspect on-site'
+    const finalSummary = triagePreview?.summary || `Reported at ${finalLocation}`
+
     const payload = {
       description: form.description,
-      location: form.location,
+      location: finalLocation,
       image: preview || null,
-      title: triagePreview?.title || form.description.slice(0, 55),
-      category: form.category || triagePreview?.category || 'Infrastructure',
-      priority: form.priority || triagePreview?.priority || 'Medium',
-      department: form.department || triagePreview?.department || 'Facilities',
-      summary: triagePreview?.summary || `Reported at ${form.location}`,
-      recommended_action: triagePreview?.recommended_action || 'Inspect on-site',
-      priority_rationale: triagePreview?.priority_rationale || 'Standard campus triage protocol'
+      title: finalTitle,
+      category: finalCategory,
+      priority: finalPriority,
+      department: finalDepartment,
+      summary: finalSummary,
+      recommended_action: finalAction,
+      priority_rationale: triagePreview?.priority_rationale || (manualOverrides.priority ? 'Manual priority override by user' : 'Standard campus triage specification')
     }
 
     try {
@@ -703,9 +744,27 @@ export default function App() {
       showNotice(`${mockId} submitted and routed to ${payload.department}`)
     } finally {
       setIsSubmitting(false)
-      setForm({ description: '', location: LOCATIONS[0], category: '', priority: '', department: '' })
+      setForm({
+        title: '',
+        description: '',
+        location: LOCATIONS[0],
+        category: 'Infrastructure',
+        priority: 'Medium',
+        department: 'Facilities',
+        recommended_action: 'Inspect on-site'
+      })
       setPreview('')
       setTriagePreview(null)
+      setManualLocation(false)
+      setShowManualSection(false)
+      setManualOverrides({
+        title: false,
+        category: false,
+        priority: false,
+        department: false,
+        location: false,
+        recommended_action: false
+      })
       setPage('operations')
       fetchAnalytics()
     }
@@ -1521,35 +1580,66 @@ export default function App() {
             </p>
 
             <form onSubmit={handleSubmit} className="report-form-3d">
+              {/* Step 1: Location Details */}
               <div className="form-section-3d">
                 <div className="form-title">
                   <span>1</span>
                   <div>
                     <h2>Location & Facility Details</h2>
-                    <p>Select the specific campus facility where the issue occurred.</p>
+                    <p>Select the specific campus facility or enter custom room/lab location.</p>
                   </div>
-                </div>
-                <label>
-                  Campus Facility / Building:
-                  <select
-                    value={form.location}
-                    onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))}
+                  <button
+                    type="button"
+                    className="manual-mode-btn"
+                    onClick={() => {
+                      setManualLocation((prev) => !prev)
+                      setManualOverrides((prev) => ({ ...prev, location: true }))
+                    }}
                   >
-                    {LOCATIONS.map((loc) => (
-                      <option key={loc} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {manualLocation ? 'Choose from Facility List' : '✎ Enter Custom Location'}
+                  </button>
+                </div>
+                {manualLocation ? (
+                  <label>
+                    Custom Location / Room / Desk:
+                    <input
+                      type="text"
+                      placeholder="e.g. Central Library, 3rd Floor Computer Lab, Desk #14"
+                      value={form.location}
+                      onChange={(e) => {
+                        setForm((prev) => ({ ...prev, location: e.target.value }))
+                        setManualOverrides((prev) => ({ ...prev, location: true }))
+                      }}
+                      required
+                    />
+                  </label>
+                ) : (
+                  <label>
+                    Campus Facility / Building:
+                    <select
+                      value={form.location}
+                      onChange={(e) => {
+                        setForm((prev) => ({ ...prev, location: e.target.value }))
+                        setManualOverrides((prev) => ({ ...prev, location: true }))
+                      }}
+                    >
+                      {LOCATIONS.map((loc) => (
+                        <option key={loc} value={loc}>
+                          {loc}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
 
+              {/* Step 2: Grievance Description & Inspection Photo */}
               <div className="form-section-3d">
                 <div className="form-title">
                   <span>2</span>
                   <div>
                     <h2>Grievance Description & Photo Evidence</h2>
-                    <p>Describe the issue in detail. KAIROS will automatically classify the category and urgency.</p>
+                    <p>Describe the issue in detail. You can use AI triage or enter all classification details manually.</p>
                   </div>
                 </div>
 
@@ -1583,7 +1673,7 @@ export default function App() {
                   )}
                 </div>
 
-                <div style={{ marginTop: '16px', display: 'flex', gap: '10px' }}>
+                <div style={{ marginTop: '16px', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                   <button
                     type="button"
                     className="view-toggle-btn"
@@ -1593,54 +1683,152 @@ export default function App() {
                     <Sparkles size={14} />
                     {isTriaging ? 'Running AI Classification...' : 'Analyze with KAIROS Neural Engine'}
                   </button>
+
+                  <button
+                    type="button"
+                    className={`view-toggle-btn ${showManualSection ? 'active' : ''}`}
+                    onClick={() => setShowManualSection((prev) => !prev)}
+                  >
+                    <Edit3 size={14} />
+                    {showManualSection ? 'Hide Classification Details' : '✎ Enter / Edit Classification Manually'}
+                  </button>
                 </div>
               </div>
 
-              {/* Triage Preview Diagnosis Box */}
-              {triagePreview && (
-                <div className="triage-preview-card-3d">
-                  <div className="triage-preview-header">
-                    <Sparkles size={16} />
-                    <strong>KAIROS Neural Classification Diagnosis</strong>
-                    <span className="triage-badge-3d">{triagePreview.triage_source}</span>
+              {/* Step 3: Classification & Operational Specifications (Manual or AI) */}
+              {(showManualSection || triagePreview) && (
+                <div className="form-section-3d manual-classification-section">
+                  <div className="form-title">
+                    <span>3</span>
+                    <div>
+                      <h2>Classification & Routing Specifications</h2>
+                      <p>
+                        {triagePreview
+                          ? 'Review AI suggestions below. You can customize or edit any field manually before submitting.'
+                          : 'Manually specify category, priority, and routing without AI.'}
+                      </p>
+                    </div>
+                    <span className="manual-status-badge">
+                      {triagePreview ? '✦ AI-Assisted (Fully Editable)' : '✎ Manual Mode (No AI)'}
+                    </span>
                   </div>
 
-                  <div className="triage-grid-3d">
-                    <div>
-                      <small>Category</small>
-                      <strong>{triagePreview.category}</strong>
+                  <div className="manual-fields-grid">
+                    {/* Title */}
+                    <div className="manual-field-block full-width">
+                      <div className="field-header-row">
+                        <label>Grievance Title / Subject:</label>
+                        <span className={`field-source-tag ${manualOverrides.title ? 'manual' : triagePreview ? 'ai' : 'manual'}`}>
+                          {manualOverrides.title ? '✎ Manually Edited' : triagePreview ? '✦ AI Suggested' : '✎ Manual Input'}
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="e.g. Broken water pipe causing hazard on walkway"
+                        value={form.title}
+                        onChange={(e) => {
+                          setForm((prev) => ({ ...prev, title: e.target.value }))
+                          setManualOverrides((prev) => ({ ...prev, title: true }))
+                        }}
+                      />
                     </div>
-                    <div>
-                      <small>Priority</small>
-                      <strong className={`pri-text-${triagePreview.priority.toLowerCase()}`}>
-                        {triagePreview.priority}
-                      </strong>
-                    </div>
-                    <div>
-                      <small>Target SLA</small>
-                      <strong>{triagePreview.sla_hours} Hours</strong>
-                    </div>
-                    <div>
-                      <small>Assigned Department</small>
-                      <strong>{triagePreview.department}</strong>
-                    </div>
-                  </div>
 
-                  <div className="triage-rec-3d">
-                    <small>Recommended First Action:</small>
-                    <p>{triagePreview.recommended_action}</p>
-                    <small className="rationale-text-3d">
-                      <ShieldAlert size={12} /> {triagePreview.priority_rationale}
-                    </small>
+                    {/* Category */}
+                    <div className="manual-field-block">
+                      <div className="field-header-row">
+                        <label>Category:</label>
+                        <span className={`field-source-tag ${manualOverrides.category ? 'manual' : triagePreview ? 'ai' : 'manual'}`}>
+                          {manualOverrides.category ? '✎ Manually Edited' : triagePreview ? '✦ AI Suggested' : '✎ Manual Input'}
+                        </span>
+                      </div>
+                      <select
+                        value={form.category}
+                        onChange={(e) => {
+                          setForm((prev) => ({ ...prev, category: e.target.value }))
+                          setManualOverrides((prev) => ({ ...prev, category: true }))
+                        }}
+                      >
+                        {CATEGORIES.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Priority Level */}
+                    <div className="manual-field-block">
+                      <div className="field-header-row">
+                        <label>Priority Level (SLA Commitment):</label>
+                        <span className={`field-source-tag ${manualOverrides.priority ? 'manual' : triagePreview ? 'ai' : 'manual'}`}>
+                          {manualOverrides.priority ? '✎ Manually Edited' : triagePreview ? '✦ AI Suggested' : '✎ Manual Input'}
+                        </span>
+                      </div>
+                      <select
+                        value={form.priority}
+                        onChange={(e) => {
+                          setForm((prev) => ({ ...prev, priority: e.target.value }))
+                          setManualOverrides((prev) => ({ ...prev, priority: true }))
+                        }}
+                      >
+                        {PRIORITIES.map((pri) => (
+                          <option key={pri} value={pri}>
+                            {pri} {pri === 'Critical' ? '(2h Emergency SLA)' : pri === 'High' ? '(12h Urgent SLA)' : pri === 'Medium' ? '(24h Standard SLA)' : '(48h Low SLA)'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Department */}
+                    <div className="manual-field-block">
+                      <div className="field-header-row">
+                        <label>Routing Department:</label>
+                        <span className={`field-source-tag ${manualOverrides.department ? 'manual' : triagePreview ? 'ai' : 'manual'}`}>
+                          {manualOverrides.department ? '✎ Manually Edited' : triagePreview ? '✦ AI Suggested' : '✎ Manual Input'}
+                        </span>
+                      </div>
+                      <select
+                        value={form.department}
+                        onChange={(e) => {
+                          setForm((prev) => ({ ...prev, department: e.target.value }))
+                          setManualOverrides((prev) => ({ ...prev, department: true }))
+                        }}
+                      >
+                        {DEPARTMENTS.map((dept) => (
+                          <option key={dept} value={dept}>
+                            {dept}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Recommended Action */}
+                    <div className="manual-field-block full-width">
+                      <div className="field-header-row">
+                        <label>Recommended Immediate Action:</label>
+                        <span className={`field-source-tag ${manualOverrides.recommended_action ? 'manual' : triagePreview ? 'ai' : 'manual'}`}>
+                          {manualOverrides.recommended_action ? '✎ Manually Edited' : triagePreview ? '✦ AI Suggested' : '✎ Manual Input'}
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="e.g. Dispatch plumbing crew and isolate main valve"
+                        value={form.recommended_action}
+                        onChange={(e) => {
+                          setForm((prev) => ({ ...prev, recommended_action: e.target.value }))
+                          setManualOverrides((prev) => ({ ...prev, recommended_action: true }))
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
               )}
 
               <div className="form-footer-3d">
                 <p>
-                  <Shield size={14} /> Human review active: AI suggestions can be adjusted by administrators anytime.
+                  <Shield size={14} /> Full human control: You can submit AI suggestions or override any value manually.
                 </p>
-                <button type="submit" className="primary-button" disabled={isSubmitting || !form.description}>
+                <button type="submit" className="primary-button" disabled={isSubmitting || !form.description.trim()}>
                   <Send size={15} />
                   {isSubmitting ? 'Routing Complaint...' : 'Confirm & Submit Grievance'}
                 </button>
