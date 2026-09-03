@@ -11,18 +11,27 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: kairos-db
+          property: connectionString
       - key: ADMIN_USERNAME
         value: admin
       - key: ADMIN_PASSWORD
-        generateValue: true
+        value: KAIROS@2026!Secure
       - key: SECRET_KEY
         generateValue: true
       - key: FRONTEND_URL
-        value: https://kairos-frontend.vercel.app
+        value: "*"
       - key: ALLOWED_ORIGINS
-        value: https://kairos-frontend.vercel.app
+        value: "*"
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
         value: gemini-1.5-flash
+
+databases:
+  - name: kairos-db
+    plan: free
+    region: oregon
+    databaseName: kairos
+    user: kairos
