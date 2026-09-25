@@ -104,6 +104,19 @@ export default function CampusDigitalTwin3D({ tickets = [], selectedLocation = n
     }
   }
 
+  // Escape closes the in-scene sector inspection drawer, consistent with every other overlay in the app
+  useEffect(() => {
+    if (!activeBuildingModal) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setActiveBuildingModal(null)
+        setCameraPreset('isometric')
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [activeBuildingModal, setCameraPreset])
+
   useEffect(() => {
     const container = mountRef.current
     if (!container) return
@@ -572,6 +585,7 @@ export default function CampusDigitalTwin3D({ tickets = [], selectedLocation = n
                   setActiveBuildingModal(null)
                   setCameraPreset('isometric')
                 }}
+                aria-label="Close sector inspection panel"
               >
                 <X size={15} />
               </button>

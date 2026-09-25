@@ -208,6 +208,7 @@ class Ticket(BaseModel):
     due: str
     is_breached: bool
     activity: List[ActivityLogItem] = []
+    reporter_token: Optional[str] = None  # returned only once, to the submitter, on creation
 
 # --- Broadcast Alerts ---
 class BroadcastAlert(BaseModel):

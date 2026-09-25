@@ -1,7 +1,8 @@
-from fastapi import FastAPI, HTTPException, Query, Depends, Request, status
+from fastapi import FastAPI, HTTPException, Query, Depends, Request, status, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from typing import List, Optional
+from pydantic import BaseModel, Field
 import os
 import re
 import base64
@@ -53,7 +54,11 @@ from .database import (
     get_engine_status
 )
 from .triage import triage_grievance
+from .agent import run_agent, synthesize_speech, AgentUnavailable
+from . import intelligence
+from .models import sanitize_user_input
 from .auth import (
+    get_optional_admin,
     get_current_admin,
     authenticate_admin,
     init_admin_user,
@@ -202,6 +207,7 @@ def validate_and_sanitize_image(image_str: Optional[str]) -> Optional[str]:
 def on_startup():
     init_db()
     init_admin_user(get_connection)
+    intelligence.init_intelligence_tables()
 
 
 # --- Public Diagnostics & Health ---
@@ -318,7 +324,10 @@ async def create_ticket(request: Request, req: TicketCreateRequest):
         }
         
     ticket_id = insert_ticket(data)
+    reporter_token = intelligence.issue_reporter_token(ticket_id)
+    intelligence.invalidate()
     created = fetch_ticket_by_id(ticket_id)
+    created["reporter_token"] = reporter_token
     return created
 
 # Public single-ticket status lookup by ID (students can track their issue)
@@ -364,6 +373,9 @@ def update_ticket(
             detail=f"Update failed for ticket {ticket_id}. Check that ticket exists and status transition is valid."
         )
         
+    intelligence.invalidate()
+    if updates.get("status") in ("Resolved", "Closed"):
+        intelligence.request_reverification(ticket_id)
     return fetch_ticket_by_id(ticket_id)
 
 @app.post("/api/tickets/bulk")
@@ -379,6 +391,10 @@ def bulk_update(
     }
     actor_name = f"Admin ({admin.get('username', 'Bulk')})"
     count = bulk_update_tickets(req.ticket_ids, updates, actor=actor_name)
+    intelligence.invalidate()
+    if str(getattr(req.status, "value", req.status)) in ("Resolved", "Closed"):
+        for tid in req.ticket_ids:
+            intelligence.request_reverification(tid)
     return {"status": "success", "updated_count": count, "ticket_ids": req.ticket_ids}
 
 @app.post("/api/broadcasts", response_model=dict)
@@ -411,7 +427,220 @@ def get_pulse(admin: dict = Depends(get_current_admin)):
 @app.post("/api/tickets/clear")
 def clear_tickets(admin: dict = Depends(get_current_admin)):
     clear_all_tickets_data()
+    intelligence.invalidate()
     return {"status": "cleared", "message": "All tickets removed by administrator."}
+
+
+# --- KAIROS AI Assistant ---
+class AgentMessage(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., min_length=1, max_length=6000)
+
+class AgentChatRequest(BaseModel):
+    messages: List[AgentMessage] = Field(..., min_length=1, max_length=24)
+
+class AgentTTSRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+
+@app.post("/api/agent/chat")
+@limiter.limit("20/minute")
+def agent_chat(request: Request, req: AgentChatRequest, admin: Optional[dict] = Depends(get_optional_admin)):
+    history = [{"role": m.role, "content": m.content.strip()} for m in req.messages if m.content.strip()]
+    if not history or history[-1]["role"] != "user":
+        raise HTTPException(status_code=400, detail="The last message must be a non-empty user message.")
+    if len(history[-1]["content"]) > 2000:
+        raise HTTPException(status_code=400, detail="Message is too long (2000 characters max).")
+    result = run_agent(history, is_admin=admin is not None)
+    result["access"] = "admin" if admin else "guest"
+    return result
+
+@app.post("/api/agent/tts")
+@limiter.limit("30/minute")
+def agent_tts(request: Request, req: AgentTTSRequest):
+    try:
+        audio = synthesize_speech(req.text.strip())
+    except AgentUnavailable as e:
+        code = 503 if str(e) == "not_configured" else 502
+        raise HTTPException(status_code=code, detail="Voice synthesis is not configured." if code == 503 else "Voice synthesis is temporarily unavailable.")
+    return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+# --- KAIROS Future Engine (admin only; every write goes through the audited ticket workflow) ---
+class SignalStateRequest(BaseModel):
+    state: str = Field(..., pattern="^(acknowledged|dismissed|active)$")
+    fingerprint: str = Field("", max_length=64)
+    note: Optional[str] = Field(None, max_length=500)
+
+class ScenarioRequest(BaseModel):
+    type: str = Field(..., pattern="^(service_outage|delay_ticket|ignore_signal)$")
+    building: Optional[str] = Field(None, max_length=100)
+    service: Optional[str] = Field(None, max_length=40)
+    scope: str = Field("building", pattern="^(building|line)$")
+    hours: int = Field(24, ge=1, le=168)
+    ticket_id: Optional[str] = Field(None, max_length=30)
+    signal_id: Optional[str] = Field(None, max_length=200)
+
+class OperationalAction(BaseModel):
+    type: str = Field(..., pattern="^(assign|escalate|set_status|add_note|reroute|broadcast|verify_resolution)$")
+    ticket_id: Optional[str] = Field(None, max_length=30)
+    owner: Optional[str] = Field(None, max_length=100)
+    priority: Optional[str] = Field(None, max_length=20)
+    status: Optional[str] = Field(None, max_length=20)
+    department: Optional[str] = Field(None, max_length=60)
+    note: Optional[str] = Field(None, max_length=2000)
+    title: Optional[str] = Field(None, max_length=200)
+    message: Optional[str] = Field(None, max_length=2000)
+    level: Optional[str] = Field("warning", pattern="^(critical|warning|info)$")
+    sector: Optional[str] = Field(None, max_length=100)
+
+class ActionPlanRequest(BaseModel):
+    actions: List[OperationalAction] = Field(..., min_length=1, max_length=25)
+    reason: Optional[str] = Field(None, max_length=500)
+    signal_key: Optional[str] = Field(None, max_length=200)
+    signal_fingerprint: Optional[str] = Field(None, max_length=64)
+
+def _clean_actions(req: ActionPlanRequest) -> List[dict]:
+    out = []
+    for a in req.actions:
+        d = a.dict()
+        for k in ("owner", "note", "title", "message", "sector"):
+            if d.get(k):
+                d[k] = sanitize_user_input(d[k], 2000)
+        out.append(d)
+    return out
+
+def _admin_actor(admin: dict) -> str:
+    return f"Admin ({admin.get('username', 'Operations')}) · Future Engine"
+
+@app.get("/api/intelligence/overview")
+@limiter.limit("60/minute")
+def intelligence_overview(request: Request, admin: dict = Depends(get_current_admin)):
+    return intelligence.overview()
+
+@app.get("/api/intelligence/topology")
+def intelligence_topology(admin: dict = Depends(get_current_admin)):
+    return intelligence.topology()
+
+@app.post("/api/intelligence/signal-state")
+def intelligence_signal_state(req: SignalStateRequest, signal_id: str = Query(..., max_length=200),
+                              admin: dict = Depends(get_current_admin)):
+    note = sanitize_user_input(req.note, 500) if req.note else None
+    intelligence.set_signal_state(signal_id, req.state, req.fingerprint, _admin_actor(admin), note)
+    return {"status": "ok", "signal_id": signal_id, "state": req.state}
+
+@app.get("/api/intelligence/signal")
+def intelligence_signal(signal_id: str = Query(..., max_length=200), admin: dict = Depends(get_current_admin)):
+    snap = intelligence.snapshot()
+    signals = intelligence.detect_signals(snap)
+    warnings = {w["id"]: w for w in intelligence.early_warnings(snap, signals)}
+    sig = next((s for s in signals if s["id"] == signal_id), None)
+    if not sig and signal_id not in warnings:
+        raise HTTPException(status_code=404, detail="This risk signal is no longer active.")
+    return {"signal": sig, "warning": warnings.get(signal_id),
+            "graph": intelligence.incident_graph(snap, signal_id, signals) if sig else None}
+
+@app.post("/api/intelligence/simulate")
+@limiter.limit("30/minute")
+def intelligence_simulate(request: Request, req: ScenarioRequest, admin: dict = Depends(get_current_admin)):
+    try:
+        return intelligence.simulate(intelligence.snapshot(), req.dict())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/intelligence/memory")
+def intelligence_memory(
+    ticket_id: Optional[str] = Query(None, max_length=30),
+    building: Optional[str] = Query(None, max_length=100),
+    category: Optional[str] = Query(None, max_length=40),
+    q: Optional[str] = Query(None, max_length=100),
+    admin: dict = Depends(get_current_admin),
+):
+    return intelligence.campus_memory(intelligence.snapshot(), ticket_id, building, category, q)
+
+@app.post("/api/intelligence/actions/preview")
+def intelligence_preview(req: ActionPlanRequest, admin: dict = Depends(get_current_admin)):
+    return intelligence.preview_actions(_clean_actions(req))
+
+@app.post("/api/intelligence/actions/execute")
+@limiter.limit("20/minute")
+def intelligence_execute(request: Request, req: ActionPlanRequest, admin: dict = Depends(get_current_admin)):
+    reason = sanitize_user_input(req.reason, 500) if req.reason else None
+    return intelligence.execute_actions(_clean_actions(req), _admin_actor(admin), reason, req.signal_key, req.signal_fingerprint)
+
+
+class DemoRequest(BaseModel):
+    action: str = Field(..., pattern="^(load|clear)$")
+
+@app.post("/api/intelligence/demo")
+def intelligence_demo(req: DemoRequest, admin: dict = Depends(get_current_admin)):
+    from .demo_scenario import load_demo, clear_demo
+    count = load_demo() if req.action == "load" else clear_demo()
+    intelligence.invalidate()
+    reporter = []
+    if req.action == "load":
+        from .demo_scenario import DEMO_REPORTER_TICKETS
+        reporter = [{"ticket_id": tid, "token": intelligence.issue_reporter_token(tid)} for tid in DEMO_REPORTER_TICKETS]
+    return {"status": req.action, "tickets": count, "demo_reporter_tickets": reporter}
+
+
+# --- Proof of Resolution & Reporter Reverification ---
+class ResolutionConfirmRequest(BaseModel):
+    confirmed: bool
+    reason: Optional[str] = Field(None, pattern="^(unresolved|partial|returned|different)$")
+    note: Optional[str] = Field(None, max_length=500)
+    image: Optional[str] = None
+
+class ResolutionVerifyRequest(BaseModel):
+    note: Optional[str] = Field(None, max_length=500)
+    image: Optional[str] = None
+
+class ReporterTicketRef(BaseModel):
+    ticket_id: str = Field(..., max_length=30)
+    token: str = Field(..., max_length=100)
+
+class ReporterTicketsRequest(BaseModel):
+    tickets: List[ReporterTicketRef] = Field(..., max_length=50)
+
+@app.get("/api/tickets/{ticket_id}/verification")
+def get_verification(ticket_id: str, admin: Optional[dict] = Depends(get_optional_admin),
+                     x_reporter_token: Optional[str] = Header(None)):
+    tid = ticket_id.upper()[:30]
+    # Reporter comments and dispute photos are only shown to the reporter (credential) or an administrator
+    private = admin is not None or intelligence.check_reporter_token(tid, x_reporter_token)
+    result = intelligence.ticket_verification(tid, include_private=private, admin_view=admin is not None)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found")
+    return result
+
+@app.post("/api/tickets/{ticket_id}/confirm-resolution")
+@limiter.limit("10/minute")
+def confirm_resolution(request: Request, ticket_id: str, req: ResolutionConfirmRequest,
+                       x_reporter_token: Optional[str] = Header(None)):
+    tid = ticket_id.upper()[:30]
+    image = validate_and_sanitize_image(req.image) if (req.image and not req.confirmed) else None
+    note = sanitize_user_input(req.note, 500) if req.note else None
+    try:
+        return intelligence.reporter_respond(tid, x_reporter_token, req.confirmed, req.reason, note, image)
+    except intelligence.ReverificationError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+
+@app.post("/api/reporter/tickets")
+@limiter.limit("30/minute")
+def reporter_ticket_status(request: Request, req: ReporterTicketsRequest):
+    return {"tickets": intelligence.reporter_tickets([t.dict() for t in req.tickets])}
+
+@app.post("/api/tickets/{ticket_id}/verify")
+def verify_resolution(ticket_id: str, req: ResolutionVerifyRequest, admin: dict = Depends(get_current_admin)):
+    tid = ticket_id.upper()[:30]
+    ticket = fetch_ticket_by_id(tid)
+    if not ticket:
+        raise HTTPException(status_code=404, detail=f"Ticket {tid} not found")
+    if ticket["status"] not in ("Resolved", "Closed"):
+        raise HTTPException(status_code=400, detail="Only resolved tickets can be verified.")
+    image = validate_and_sanitize_image(req.image)
+    note = sanitize_user_input(req.note, 500) if req.note else None
+    intelligence.record_verification(tid, "admin_verified", f"Admin ({admin.get('username', 'Operations')})", note, image)
+    return intelligence.ticket_verification(tid, include_private=True, admin_view=True)
 
 
 # --- Direct Download Endpoints ---

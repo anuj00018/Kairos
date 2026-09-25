@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { AlertCircle, AlertTriangle, Bell, Plus, Radio, Trash2, X } from 'lucide-react'
+import useModalA11y from '../hooks/useModalA11y'
 
 export default function BroadcastBanner({ broadcasts = [], onDismiss, onCreateBroadcast, isAdmin }) {
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -7,6 +8,7 @@ export default function BroadcastBanner({ broadcasts = [], onDismiss, onCreateBr
   const [message, setMessage] = useState('')
   const [level, setLevel] = useState('warning')
   const [sector, setSector] = useState('Campus-Wide')
+  const modalRef = useModalA11y(showCreateModal, () => setShowCreateModal(false))
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -40,6 +42,7 @@ export default function BroadcastBanner({ broadcasts = [], onDismiss, onCreateBr
                 className="dismiss-broadcast-btn"
                 onClick={() => onDismiss(b.id)}
                 title="Dismiss Broadcast"
+                aria-label={`Dismiss broadcast: ${b.title}`}
               >
                 <X size={14} />
               </button>
@@ -63,19 +66,26 @@ export default function BroadcastBanner({ broadcasts = [], onDismiss, onCreateBr
 
       {/* Create Broadcast Modal */}
       {showCreateModal && (
-        <div className="modal-backdrop">
-          <div className="admin-login-modal">
+        <div className="modal-backdrop" onClick={() => setShowCreateModal(false)}>
+          <div
+            className="admin-login-modal"
+            onClick={(e) => e.stopPropagation()}
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="broadcast-modal-title"
+          >
             <div className="modal-header-3d">
               <div className="header-badge-row">
                 <span className="auth-lock-badge">
                   <Radio size={14} />
                   Emergency Broadcast Transceiver
                 </span>
-                <button className="close-modal-btn" onClick={() => setShowCreateModal(false)}>
+                <button className="close-modal-btn" onClick={() => setShowCreateModal(false)} aria-label="Close modal">
                   <X size={16} />
                 </button>
               </div>
-              <h2>Publish Campus-Wide Advisory</h2>
+              <h2 id="broadcast-modal-title">Publish Campus-Wide Advisory</h2>
               <p>Broadcasts will pin immediately to all student portals and executive operations dashboards.</p>
             </div>
 

@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react'
 import { Settings, Palette, Check, Shield, Database, X, Sparkles, Moon, Sun, Briefcase } from 'lucide-react'
+import useModalA11y from '../hooks/useModalA11y'
 
 export const THEMES = [
   {
@@ -38,30 +38,31 @@ export const THEMES = [
 ]
 
 export default function SettingsModal({ isOpen, onClose, currentTheme, onSelectTheme, adminUser, dbStatus }) {
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && isOpen) onClose()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
+  const modalRef = useModalA11y(isOpen, onClose)
 
   if (!isOpen) return null
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="settings-modal-card" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="settings-modal-card"
+        onClick={(e) => e.stopPropagation()}
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-modal-title"
+      >
         <div className="settings-modal-header">
           <div className="settings-header-title">
             <span className="settings-icon-mark">
               <Settings size={18} />
             </span>
             <div>
-              <h3>System Settings & Appearance</h3>
+              <h3 id="settings-modal-title">System Settings & Appearance</h3>
               <p>Customize portal theme, display preferences, and view operational profile</p>
             </div>
           </div>
-          <button className="settings-close-btn" onClick={onClose} title="Close Settings">
+          <button className="settings-close-btn" onClick={onClose} title="Close Settings" aria-label="Close settings">
             <X size={16} />
           </button>
         </div>
@@ -136,18 +137,17 @@ export default function SettingsModal({ isOpen, onClose, currentTheme, onSelectT
             <div className="settings-section-header">
               <Database size={14} />
               <h4>Official Platform Documentation</h4>
-              <span className="section-badge" style={{ background: 'rgba(37,99,235,0.15)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)' }}>PDF Available</span>
+              <span className="section-badge">PDF Available</span>
             </div>
-            <div style={{ marginTop: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="doc-download-row">
               <div>
-                <strong style={{ fontSize: '13px', display: 'block', marginBottom: '2px' }}>KAIROS Master PRD & TRD Specification</strong>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Complete 400KB+ PDF with product details, architecture, data contracts & security models</span>
+                <strong>KAIROS Master PRD & TRD Specification</strong>
+                <span>Complete 400KB+ PDF with product details, architecture, data contracts & security models</span>
               </div>
               <a
                 href="/KAIROS_Complete_Product_and_Technical_Documentation.pdf"
                 download="KAIROS_Complete_Product_and_Technical_Documentation.pdf"
-                className="primary-button"
-                style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '6px 12px' }}
+                className="primary-button doc-download-btn"
               >
                 <span>Download PDF</span>
               </a>

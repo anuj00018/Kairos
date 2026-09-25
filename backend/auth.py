@@ -136,6 +136,15 @@ async def get_current_admin(
     return {"username": username, "role": role, "token": raw_token, "token_data": payload}
 
 
+async def get_optional_admin(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+) -> Optional[dict]:
+    """Guest access when no token is sent; a token that IS sent must be valid (401 otherwise)."""
+    if credentials is None:
+        return None
+    return await get_current_admin(credentials)
+
+
 def init_admin_user(get_connection_func):
     """
     Ensure the admin_users table exists and seed the initial admin

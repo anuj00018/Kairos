@@ -1,32 +1,70 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
-  Activity,
-  AlertCircle,
-  Calendar,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Clock,
-  Download,
+  Cpu,
   FileSpreadsheet,
   FileText,
-  Filter,
+  Fingerprint,
   History,
   Layers,
   MapPin,
   RefreshCw,
+  Route,
   Search,
-  ShieldCheck,
-  Tag,
+  Send,
+  Shield,
   User,
   UserCheck,
+  UserCog,
   X
 } from 'lucide-react'
+
+// Real event_type values emitted by backend/database.py — mapped to an icon
+// and a plain-language label so the trail reads as a story, not raw strings.
+const EVENT_TYPE_META = {
+  'Grievance Intake': { icon: Send, label: 'Intake' },
+  'AI Autonomous Triage': { icon: Cpu, label: 'AI Triage' },
+  'Staff Assignment': { icon: UserCog, label: 'Assignment' },
+  'Status Transition': { icon: Route, label: 'Status Change' },
+  'Admin Directive': { icon: Shield, label: 'Directive' },
+  'Department Re-route': { icon: Route, label: 'Re-route' },
+  'Operational Event': { icon: History, label: 'Event' }
+}
+const DEFAULT_EVENT_META = { icon: History, label: 'Event' }
+
+function eventMeta(type) {
+  return EVENT_TYPE_META[type] || DEFAULT_EVENT_META
+}
+
+function HashChip({ hash }) {
+  const [copied, setCopied] = useState(false)
+  if (!hash) return null
+  const short = `${hash.slice(0, 8)}…${hash.slice(-6)}`
+  const copyHash = async (e) => {
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(hash)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* clipboard unavailable — chip still shows the hash via title */
+    }
+  }
+  return (
+    <button type="button" className="hash-chip" onClick={copyHash} title={`SHA-256: ${hash}\nClick to copy`}>
+      <Fingerprint size={11} />
+      <span>{copied ? 'Copied' : short}</span>
+    </button>
+  )
+}
 
 export default function AuditExplorer({ onRefresh, adminToken }) {
   const [logs, setLogs] = useState([])
   const [viewMode, setViewMode] = useState('grouped') // 'grouped' (default - no repetition!) or 'timeline'
   const [filterActor, setFilterActor] = useState('All')
+  const [filterEventType, setFilterEventType] = useState('All')
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState('')
@@ -55,7 +93,7 @@ export default function AuditExplorer({ onRefresh, adminToken }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [adminToken])
 
   useEffect(() => {
     fetchLogs()
@@ -72,10 +110,18 @@ export default function AuditExplorer({ onRefresh, adminToken }) {
     return Array.from(actSet)
   }, [logs])
 
+  // Event types actually present in this dataset (never show an empty filter option)
+  const eventTypes = useMemo(() => {
+    const typeSet = new Set(['All'])
+    logs.forEach(l => { if (l.event_type) typeSet.add(l.event_type) })
+    return Array.from(typeSet)
+  }, [logs])
+
   // Filtered raw logs
   const filteredLogs = useMemo(() => {
     return logs.filter(l => {
       const matchActor = filterActor === 'All' || l.actor === filterActor
+      const matchEventType = filterEventType === 'All' || l.event_type === filterEventType
       const matchSearch =
         !searchTerm ||
         l.ticket_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -83,9 +129,9 @@ export default function AuditExplorer({ onRefresh, adminToken }) {
         l.ticket_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         l.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         l.actor?.toLowerCase().includes(searchTerm.toLowerCase())
-      return matchActor && matchSearch
+      return matchActor && matchEventType && matchSearch
     })
-  }, [logs, filterActor, searchTerm])
+  }, [logs, filterActor, filterEventType, searchTerm])
 
   // Grouped logs by ticket ID (Eliminates issue repetition!)
   const groupedByTicket = useMemo(() => {
@@ -195,12 +241,14 @@ export default function AuditExplorer({ onRefresh, adminToken }) {
         </div>
       </div>
 
-      {notice && (
-        <div className="analytics-toast">
-          <CheckCircle2 size={15} />
-          <span>{notice}</span>
-        </div>
-      )}
+      <div aria-live="polite">
+        {notice && (
+          <div className="analytics-toast">
+            <CheckCircle2 size={15} />
+            <span>{notice}</span>
+          </div>
+        )}
+      </div>
 
       {/* Filter and View Mode Strip */}
       <div className="audit-filter-strip">
@@ -211,22 +259,35 @@ export default function AuditExplorer({ onRefresh, adminToken }) {
             placeholder="Search ticket ID, action, facility, actor..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            aria-label="Search audit trail"
           />
           {searchTerm && (
-            <button onClick={() => setSearchTerm('')}>
+            <button onClick={() => setSearchTerm('')} aria-label="Clear search">
               <X size={13} />
             </button>
           )}
         </div>
 
         <div className="audit-actor-select">
-          <label>
+          <label htmlFor="audit-actor-filter">
             <UserCheck size={13} />
             Actor:
           </label>
-          <select value={filterActor} onChange={(e) => setFilterActor(e.target.value)}>
+          <select id="audit-actor-filter" value={filterActor} onChange={(e) => setFilterActor(e.target.value)}>
             {actors.map(a => (
               <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="audit-actor-select">
+          <label htmlFor="audit-event-filter">
+            <Layers size={13} />
+            Event:
+          </label>
+          <select id="audit-event-filter" value={filterEventType} onChange={(e) => setFilterEventType(e.target.value)}>
+            {eventTypes.map(t => (
+              <option key={t} value={t}>{t === 'All' ? 'All Event Types' : eventMeta(t).label}</option>
             ))}
           </select>
         </div>
@@ -267,14 +328,17 @@ export default function AuditExplorer({ onRefresh, adminToken }) {
               return (
                 <div key={group.ticket_id} className="audit-issue-card">
                   {/* Issue Header - Displays Once per Issue */}
-                  <div
+                  <button
+                    type="button"
                     className="issue-header-row"
                     onClick={() => toggleExpand(group.ticket_id)}
+                    aria-expanded={isExpanded}
+                    aria-controls={`audit-events-${group.ticket_id}`}
                   >
                     <div className="issue-header-left">
-                      <button className="expand-chevron">
+                      <span className="expand-chevron">
                         {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                      </button>
+                      </span>
                       <span className="issue-ticket-badge">{group.ticket_id}</span>
                       <strong className="issue-headline">{group.title}</strong>
                     </div>
@@ -286,34 +350,42 @@ export default function AuditExplorer({ onRefresh, adminToken }) {
                       <span className="issue-category-tag">{group.category}</span>
                       <span className="issue-count-pill">{group.events.length} Event{group.events.length === 1 ? '' : 's'}</span>
                     </div>
-                  </div>
+                  </button>
 
                   {/* Expanded Event Timeline for this specific issue */}
                   {isExpanded && (
-                    <div className="issue-timeline-body">
+                    <div className="issue-timeline-body" id={`audit-events-${group.ticket_id}`}>
                       <div className="issue-events-list">
-                        {group.events.map((evt, idx) => (
-                          <div key={evt.id || idx} className="issue-event-row">
-                            <span className="event-bullet" />
-                            <div className="event-content">
-                              <div className="event-top-line">
-                                <strong className="event-action-text">{evt.action}</strong>
-                                <span className="event-timestamp">{evt.created_at}</span>
-                              </div>
-                              {evt.notes && (
-                                <div className="event-note-box">
-                                  <strong>Directive Note:</strong> {evt.notes}
+                        {group.events.map((evt, idx) => {
+                          const meta = eventMeta(evt.event_type)
+                          const EventIcon = meta.icon
+                          return (
+                            <div key={evt.id || idx} className="issue-event-row">
+                              <span className="event-bullet" title={meta.label}>
+                                <EventIcon size={11} />
+                              </span>
+                              <div className="event-content">
+                                <div className="event-top-line">
+                                  <strong className="event-action-text">{evt.action}</strong>
+                                  <span className="event-timestamp" title={evt.timestamp_iso || undefined}>{evt.created_at}</span>
                                 </div>
-                              )}
-                              <div className="event-actor-row">
-                                <span className="event-actor-tag">
-                                  <User size={11} />
-                                  {evt.actor}
-                                </span>
+                                {evt.notes && (
+                                  <div className="event-note-box">
+                                    <strong>Directive Note:</strong> {evt.notes}
+                                  </div>
+                                )}
+                                <div className="event-actor-row">
+                                  <span className="event-actor-tag">
+                                    <User size={11} />
+                                    {evt.actor}
+                                  </span>
+                                  <span className="event-type-tag">{meta.label}</span>
+                                  <HashChip hash={evt.sha256_hash} />
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     </div>
                   )}
@@ -331,39 +403,47 @@ export default function AuditExplorer({ onRefresh, adminToken }) {
               <p>No audit activity found matching your search filters.</p>
             </div>
           ) : (
-            filteredLogs.map((entry) => (
-              <div key={entry.id} className="audit-timeline-card">
-                <div className="timeline-action-header">
-                  <div className="action-title-group">
-                    <span className="timeline-ticket-pill">{entry.ticket_id}</span>
-                    <strong className="timeline-action-title">{entry.action}</strong>
+            filteredLogs.map((entry) => {
+              const meta = eventMeta(entry.event_type)
+              const EventIcon = meta.icon
+              return (
+                <div key={entry.id} className="audit-timeline-card">
+                  <div className="timeline-action-header">
+                    <div className="action-title-group">
+                      <span className="timeline-event-icon" title={meta.label}>
+                        <EventIcon size={12} />
+                      </span>
+                      <span className="timeline-ticket-pill">{entry.ticket_id}</span>
+                      <strong className="timeline-action-title">{entry.action}</strong>
+                    </div>
+                    <span className="timeline-time" title={entry.timestamp_iso || undefined}>{entry.created_at}</span>
                   </div>
-                  <span className="timeline-time">{entry.created_at}</span>
-                </div>
 
-                <div className="timeline-issue-ref">
-                  <span className="issue-ref-label">Regarding:</span>
-                  <span className="issue-ref-name">{entry.ticket_title}</span>
-                </div>
-
-                {entry.notes && (
-                  <div className="event-note-box" style={{ marginTop: '8px' }}>
-                    <strong>Note:</strong> {entry.notes}
+                  <div className="timeline-issue-ref">
+                    <span className="issue-ref-label">Regarding:</span>
+                    <span className="issue-ref-name">{entry.ticket_title}</span>
                   </div>
-                )}
 
-                <div className="timeline-footer-row">
-                  <span className="event-actor-tag">
-                    <User size={11} /> {entry.actor}
-                  </span>
-                  {entry.location && (
-                    <span className="event-loc-tag">
-                      <MapPin size={11} /> {entry.location}
-                    </span>
+                  {entry.notes && (
+                    <div className="event-note-box timeline-note">
+                      <strong>Note:</strong> {entry.notes}
+                    </div>
                   )}
+
+                  <div className="timeline-footer-row">
+                    <span className="event-actor-tag">
+                      <User size={11} /> {entry.actor}
+                    </span>
+                    {entry.location && (
+                      <span className="event-loc-tag">
+                        <MapPin size={11} /> {entry.location}
+                      </span>
+                    )}
+                    <HashChip hash={entry.sha256_hash} />
+                  </div>
                 </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
       )}

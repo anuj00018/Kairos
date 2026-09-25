@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { KeyRound, Lock, Shield, User, X, ArrowRight, ShieldCheck, RefreshCw } from 'lucide-react'
+import useModalA11y from '../hooks/useModalA11y'
 
 export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess, currentAdmin, onPasswordChanged }) {
   const [mode, setMode] = useState('login') // 'login' or 'change_password'
@@ -11,6 +12,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess, curre
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  const modalRef = useModalA11y(isOpen, onClose)
 
   if (!isOpen) return null
 
@@ -96,7 +98,14 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess, curre
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="admin-login-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="admin-login-modal"
+        onClick={(e) => e.stopPropagation()}
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="admin-login-modal-title"
+      >
         <div className="modal-header-3d">
           <div className="header-badge-row">
             <span className="auth-lock-badge">
@@ -107,7 +116,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess, curre
               <X size={16} />
             </button>
           </div>
-          <h2>{mode === 'login' ? 'Admin Portal Sign-In' : 'Change Admin Password'}</h2>
+          <h2 id="admin-login-modal-title">{mode === 'login' ? 'Admin Portal Sign-In' : 'Change Admin Password'}</h2>
           <p>
             {mode === 'login'
               ? 'Authorized campus operations staff only. Credentials are authenticated with server-side bcrypt verification.'
@@ -116,12 +125,11 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess, curre
         </div>
 
         {currentAdmin && (
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <div className="modal-tab-row">
             <button
               type="button"
               className={mode === 'login' ? 'view-toggle-btn active' : 'view-toggle-btn'}
               onClick={() => { setMode('login'); setError(''); setSuccess(''); }}
-              style={{ flex: 1, padding: '8px', fontSize: '12px' }}
             >
               Session Info
             </button>
@@ -129,15 +137,16 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess, curre
               type="button"
               className={mode === 'change_password' ? 'view-toggle-btn active' : 'view-toggle-btn'}
               onClick={() => { setMode('change_password'); setError(''); setSuccess(''); }}
-              style={{ flex: 1, padding: '8px', fontSize: '12px' }}
             >
               Change Password
             </button>
           </div>
         )}
 
-        {error && <div className="auth-error-banner">{error}</div>}
-        {success && <div className="auth-error-banner" style={{ background: '#1c1c1c', borderColor: '#444', color: '#fff' }}>{success}</div>}
+        <div aria-live="polite">
+          {error && <div className="auth-error-banner" role="alert">{error}</div>}
+          {success && <div className="auth-success-banner" role="status">{success}</div>}
+        </div>
 
         {mode === 'login' ? (
           <form onSubmit={handleLogin} className="login-form-3d">

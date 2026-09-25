@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, lazy, Suspense } from 'react'
 import {
   Activity,
   AlertTriangle,
   ArrowRight,
   BarChart3,
   Bell,
+  Bot,
   CheckCircle2,
   ChevronRight,
   Clock3,
@@ -17,6 +18,8 @@ import {
   Filter,
   Flame,
   Globe,
+  Radar,
+  Telescope,
   Grid,
   History,
   Info,
@@ -25,6 +28,7 @@ import {
   LayoutDashboard,
   LogOut,
   MapPin,
+  Menu,
   MessageSquare,
   Palette,
   Plus,
@@ -52,6 +56,18 @@ import SettingsModal from './components/SettingsModal'
 import BroadcastBanner from './components/BroadcastBanner'
 import AnalyticsStudio from './components/AnalyticsStudio'
 import AuditExplorer from './components/AuditExplorer'
+import KairosAgent from './components/KairosAgent'
+import NeuralPipeline3D from './components/NeuralPipeline3D'
+import Card3D from './components/Card3D'
+import useModalA11y from './hooks/useModalA11y'
+
+// Three.js digital twin is heavy — code-split so it only loads when visited
+const CampusDigitalTwin3D = lazy(() => import('./components/CampusDigitalTwin3D'))
+const WarRoom = lazy(() => import('./components/WarRoom'))
+const FutureEngine = lazy(() => import('./components/FutureEngine'))
+import ResolutionProof from './components/intelligence/ResolutionProof'
+import ReporterCenter from './components/intelligence/ReporterCenter'
+import { addReports } from './components/intelligence/reporterStore'
 import waterLeakImage from './assets/water-leak.png'
 import './App.css'
 
@@ -88,6 +104,25 @@ function Tag({ type, children }) {
   return <span className={`tag ${type}-${String(children).toLowerCase().replaceAll(' ', '-')}`}>{children}</span>
 }
 
+function AccessGate({ description, onSignIn, onBack }) {
+  return (
+    <div className="access-gate-3d">
+      <ShieldAlert size={44} className="access-gate-icon" />
+      <h2>Administrator Access Required</h2>
+      <p>{description}</p>
+      <div className="access-gate-actions">
+        <button className="primary-button" onClick={onSignIn}>
+          <KeyRound size={14} />
+          Sign In as Administrator
+        </button>
+        <button className="btn-cancel" onClick={onBack}>
+          Submit or Track Grievance
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem('kairos_admin_token') || '')
   const [adminUser, setAdminUser] = useState(() => {
@@ -98,7 +133,7 @@ export default function App() {
       return null
     }
   })
-  const [page, setPage] = useState(() => (localStorage.getItem('kairos_admin_token') ? 'operations' : 'report'))
+  const [page, setPage] = useState(() => (localStorage.getItem('kairos_admin_token') ? 'warroom' : 'report'))
   const [tickets, setTickets] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [filters, setFilters] = useState({ status: 'All', priority: 'All', department: 'All', location: 'All', search: '' })
@@ -126,12 +161,18 @@ export default function App() {
   const [analytics, setAnalytics] = useState(null)
   const [broadcasts, setBroadcasts] = useState([])
   const [isTriaging, setIsTriaging] = useState(false)
+  const [triageStep, setTriageStep] = useState(0)
   const [triagePreview, setTriagePreview] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [adminNote, setAdminNote] = useState('')
   const [backendOnline, setBackendOnline] = useState(true)
   const [showLoginModal, setShowLoginModal] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const mobileDrawerRef = useModalA11y(mobileNavOpen, () => setMobileNavOpen(false))
+  const [ticketConfirmation, setTicketConfirmation] = useState(null)
+  const [futureSignalId, setFutureSignalId] = useState(null)
+  const [reporterAwaiting, setReporterAwaiting] = useState(0)
 
   // 3 Professional Themes: 'black-white', 'white-black', 'professional-color'
   const [currentTheme, setCurrentTheme] = useState(() => {
@@ -168,9 +209,17 @@ export default function App() {
     setAdminUser(data.user)
     localStorage.setItem('kairos_admin_token', data.token)
     localStorage.setItem('kairos_admin_user', JSON.stringify(data.user))
-    setPage('operations')
+    setPage('warroom')
+    setMobileNavOpen(false)
     showNotice(`Administrator session established: ${data.user.name}`)
   }
+
+  const handleSessionExpired = useCallback(() => {
+    setAdminToken('')
+    setAdminUser(null)
+    localStorage.removeItem('kairos_admin_token')
+    localStorage.removeItem('kairos_admin_user')
+  }, [])
 
   const handleLogout = async () => {
     if (adminToken) {
@@ -188,6 +237,7 @@ export default function App() {
     localStorage.removeItem('kairos_admin_token')
     localStorage.removeItem('kairos_admin_user')
     setPage('report')
+    setMobileNavOpen(false)
     showNotice('Administrator session terminated. Switched to public student view.')
   }
 
@@ -305,9 +355,10 @@ export default function App() {
   }, [adminToken, fetchTickets, fetchAnalytics])
 
   // Public Student Ticket Tracking Handler
-  const handleTrackTicket = async (e) => {
+  const handleTrackTicket = async (e, idOverride) => {
     if (e) e.preventDefault()
-    const cleanId = trackIdInput.trim().toUpperCase()
+    const cleanId = (idOverride || trackIdInput).trim().toUpperCase()
+    if (idOverride) setTrackIdInput(idOverride)
     if (!cleanId) return
 
     setTrackLoading(true)
@@ -368,7 +419,7 @@ export default function App() {
   const handleStatusChange = async (ticketId, nextStatus) => {
     if (!adminToken) {
       showNotice('Admin authentication required to change status.')
-      setShowLoginModal(true)
+      openLoginModal()
       return
     }
     try {
@@ -400,7 +451,7 @@ export default function App() {
   const handleOwnerChange = async (ticketId, nextOwner) => {
     if (!adminToken) {
       showNotice('Admin authentication required to assign staff.')
-      setShowLoginModal(true)
+      openLoginModal()
       return
     }
     try {
@@ -429,7 +480,7 @@ export default function App() {
     if (!adminNote.trim()) return
     if (!adminToken) {
       showNotice('Admin authentication required.')
-      setShowLoginModal(true)
+      openLoginModal()
       return
     }
     const noteText = adminNote.trim()
@@ -460,7 +511,7 @@ export default function App() {
     if (selectedTicketIds.length === 0) return
     if (!adminToken) {
       showNotice('Admin authentication required for bulk actions.')
-      setShowLoginModal(true)
+      openLoginModal()
       return
     }
     try {
@@ -507,7 +558,7 @@ export default function App() {
   const handleCreateBroadcast = async (data) => {
     if (!adminToken) {
       showNotice('Admin authentication required to post emergency alerts.')
-      setShowLoginModal(true)
+      openLoginModal()
       return
     }
     try {
@@ -535,6 +586,9 @@ export default function App() {
       return
     }
     setIsTriaging(true)
+    setTriageStep(1)
+    window.setTimeout(() => setTriageStep((s) => (s < 2 ? 2 : s)), 300)
+    window.setTimeout(() => setTriageStep((s) => (s < 3 ? 3 : s)), 700)
     try {
       const res = await fetch('/api/tickets/triage', {
         method: 'POST',
@@ -558,7 +612,8 @@ export default function App() {
         }))
         setShowManualSection(true)
         showNotice(`AI classified as ${triageData.category} (${triageData.priority}) — review or edit manually below!`)
-        setIsTriaging(false)
+        setTriageStep(4)
+        window.setTimeout(() => { setIsTriaging(false); setTriageStep(0) }, 700)
         return
       }
     } catch (e) {
@@ -622,19 +677,18 @@ export default function App() {
     }))
     setShowManualSection(true)
     showNotice(`Classified as ${cat} (${pri}) — review or edit manually below!`)
-    setIsTriaging(false)
+    setTriageStep(4)
+    window.setTimeout(() => { setIsTriaging(false); setTriageStep(0) }, 700)
   }
 
   // Handle Photo Upload (Secure File Validation)
-  const handlePhotoUpload = (e) => {
-    const file = e.target.files?.[0]
+  const processPhotoFile = (file) => {
     if (!file) return
 
     // 1. MIME Type Validation
     const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
     if (!allowedMimeTypes.includes(file.type.toLowerCase())) {
       showNotice('Security Warning: Only valid PNG, JPEG, and WebP images are allowed.')
-      e.target.value = ''
       return
     }
 
@@ -642,7 +696,6 @@ export default function App() {
     const maxSizeBytes = 5 * 1024 * 1024
     if (file.size > maxSizeBytes) {
       showNotice('File size limit exceeded: Photo must be under 5MB.')
-      e.target.value = ''
       return
     }
 
@@ -656,6 +709,18 @@ export default function App() {
       showNotice('Failed to read selected image file.')
     }
     reader.readAsDataURL(file)
+  }
+
+  const handlePhotoUpload = (e) => {
+    processPhotoFile(e.target.files?.[0])
+    e.target.value = ''
+  }
+
+  const [isDraggingPhoto, setIsDraggingPhoto] = useState(false)
+  const handlePhotoDrop = (e) => {
+    e.preventDefault()
+    setIsDraggingPhoto(false)
+    processPhotoFile(e.dataTransfer.files?.[0])
   }
 
   // Submit Complaint
@@ -696,6 +761,8 @@ export default function App() {
         setTickets((curr) => [created, ...curr.filter(t => t.id !== created.id)])
         setNewTicketIds((prev) => new Set([...prev, created.id]))
         setSelectedId(created.id)
+        setTicketConfirmation(created)
+        if (created.reporter_token) addReports([{ ticket_id: created.id, token: created.reporter_token, title: created.title }])
         showNotice(`${created.id} submitted and routed to ${created.department}!`)
         return
       }
@@ -741,6 +808,7 @@ export default function App() {
       setTickets((curr) => [fallbackTicket, ...curr.filter(t => t.id !== fallbackTicket.id)])
       setNewTicketIds((prev) => new Set([...prev, fallbackTicket.id]))
       setSelectedId(mockId)
+      setTicketConfirmation(fallbackTicket)
       showNotice(`${mockId} submitted and routed to ${payload.department}`)
     } finally {
       setIsSubmitting(false)
@@ -765,7 +833,6 @@ export default function App() {
         location: false,
         recommended_action: false
       })
-      setPage('operations')
       fetchAnalytics()
     }
   }
@@ -774,7 +841,7 @@ export default function App() {
   const handleClearTickets = async () => {
     if (!adminToken) {
       showNotice('Admin authentication required.')
-      setShowLoginModal(true)
+      openLoginModal()
       return
     }
     if (!window.confirm('Are you sure you want to clear all complaints?')) return
@@ -810,15 +877,93 @@ export default function App() {
     }
   }
 
+  // Opening any overlay also closes the mobile nav drawer — never stack two overlays
+  const openLoginModal = () => {
+    setShowLoginModal(true)
+    setMobileNavOpen(false)
+  }
+  const openSettingsModal = () => {
+    setShowSettingsModal(true)
+    setMobileNavOpen(false)
+  }
+
+  // Navigate + close the mobile drawer (no-op on desktop where the drawer never opens)
+  const goTo = (nextPage) => {
+    if (!adminUser && nextPage !== 'report' && nextPage !== 'agent') {
+      openLoginModal()
+    } else {
+      setPage(nextPage)
+    }
+    setMobileNavOpen(false)
+  }
+
+  // Digital Twin sector click syncs the Operations queue filter and jumps to the queue
+  const openFutureSignal = useCallback((signalId) => {
+    setFutureSignalId(signalId)
+    setPage('future')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
+
+  const openTicketInOps = useCallback((ticketId) => {
+    setFilters({ status: 'All', priority: 'All', department: 'All', location: 'All', search: '' })
+    setSelectedId(ticketId)
+    setPage('operations')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
+
+  const openTwinFromWarRoom = useCallback((building) => {
+    if (building) setFilters((prev) => ({ ...prev, location: 'All', search: building.split(' ')[0] }))
+    setPage('twin')
+  }, [])
+
+  const handleTwinSelectLocation = (locationId) => {
+    setFilters((prev) => ({ ...prev, location: locationId }))
+    setPage('operations')
+  }
+
+  const handleTwinQuickDispatch = (locationId) => {
+    showNotice(`Simulated dispatch logged for ${locationId}`)
+  }
+
   return (
     <main className="app-shell">
+      {/* Mobile Topbar (hamburger + brand, visible below 820px) */}
+      <div className="mobile-topbar">
+        <div className="brand">
+          <span className="brand-mark">
+            <Sparkles size={16} />
+          </span>
+          KAI<span className="brand-accent">ROS</span>
+        </div>
+        <button
+          className="hamburger-btn"
+          onClick={() => setMobileNavOpen(true)}
+          aria-label="Open navigation menu"
+          aria-expanded={mobileNavOpen}
+        >
+          <Menu size={18} />
+        </button>
+      </div>
+
+      {mobileNavOpen && (
+        <div className="sidebar-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />
+      )}
+
       {/* High-Contrast Black & White Sidebar */}
-      <aside className="sidebar">
+      <aside className={`sidebar${mobileNavOpen ? ' mobile-open' : ''}`} ref={mobileDrawerRef}>
         <div className="brand">
           <span className="brand-mark">
             <Sparkles size={18} />
           </span>
           KAI<span className="brand-accent">ROS</span>
+          <button
+            type="button"
+            className="drawer-close-btn"
+            onClick={() => setMobileNavOpen(false)}
+            aria-label="Close navigation menu"
+          >
+            <X size={18} />
+          </button>
         </div>
 
         {/* User Profile / Settings & Appearance Area */}
@@ -831,10 +976,10 @@ export default function App() {
                 <span>{adminUser.role}</span>
                 <small className="badge-dept">{adminUser.department}</small>
               </div>
-              <button className="sidebar-settings-btn" onClick={() => setShowSettingsModal(true)} title="Settings & Appearance">
+              <button className="sidebar-settings-btn" onClick={() => openSettingsModal()} title="Settings & Appearance" aria-label="Settings & Appearance">
                 <Settings size={14} />
               </button>
-              <button className="auth-logout-btn" onClick={handleLogout} title="Sign Out">
+              <button className="auth-logout-btn" onClick={handleLogout} title="Sign Out" aria-label="Sign out">
                 <LogOut size={13} />
               </button>
             </div>
@@ -843,11 +988,11 @@ export default function App() {
               <div className="guest-info">
                 <Shield size={14} />
                 <span>Guest / Student Mode</span>
-                <button className="sidebar-settings-btn" onClick={() => setShowSettingsModal(true)} title="Settings & Appearance">
+                <button className="sidebar-settings-btn" onClick={() => openSettingsModal()} title="Settings & Appearance" aria-label="Settings & Appearance">
                   <Settings size={14} />
                 </button>
               </div>
-              <button className="sidebar-login-btn" onClick={() => setShowLoginModal(true)}>
+              <button className="sidebar-login-btn" onClick={() => openLoginModal()}>
                 <KeyRound size={12} />
                 Admin Portal Login
               </button>
@@ -859,43 +1004,66 @@ export default function App() {
         <nav>
           <button
             className={page === 'report' ? 'nav-item active' : 'nav-item'}
-            onClick={() => setPage('report')}
+            onClick={() => goTo('report')}
           >
             <Plus size={17} />
             Student Grievance Intake
           </button>
           <button
+            className={page === 'agent' ? 'nav-item active' : 'nav-item'}
+            onClick={() => goTo('agent')}
+          >
+            <Bot size={17} />
+            KAIROS AI
+            <small className="nav-new-tag">Voice</small>
+          </button>
+          <button
+            className={page === 'warroom' ? 'nav-item active' : 'nav-item'}
+            onClick={() => goTo('warroom')}
+          >
+            <Radar size={17} />
+            War Room
+            {!adminUser && <small className="nav-restricted-tag">Restricted</small>}
+          </button>
+          <button
+            className={page === 'future' ? 'nav-item active' : 'nav-item'}
+            onClick={() => goTo('future')}
+          >
+            <Telescope size={17} />
+            Future Engine
+            {!adminUser && <small className="nav-restricted-tag">Restricted</small>}
+          </button>
+          <button
             className={page === 'operations' ? 'nav-item active' : 'nav-item'}
-            onClick={() => {
-              if (!adminUser) setShowLoginModal(true)
-              setPage('operations')
-            }}
+            onClick={() => goTo('operations')}
           >
             <LayoutDashboard size={17} />
             Operations Hub
-            {!adminUser && <small style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.6 }}>Restricted</small>}
+            {!adminUser && <small className="nav-restricted-tag">Restricted</small>}
+          </button>
+          <button
+            className={page === 'twin' ? 'nav-item active' : 'nav-item'}
+            onClick={() => goTo('twin')}
+          >
+            <Globe size={17} />
+            Digital Twin
+            {!adminUser && <small className="nav-restricted-tag">Restricted</small>}
           </button>
           <button
             className={page === 'analytics' ? 'nav-item active' : 'nav-item'}
-            onClick={() => {
-              if (!adminUser) setShowLoginModal(true)
-              setPage('analytics')
-            }}
+            onClick={() => goTo('analytics')}
           >
             <BarChart3 size={17} />
             Analytics Studio
-            {!adminUser && <small style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.6 }}>Restricted</small>}
+            {!adminUser && <small className="nav-restricted-tag">Restricted</small>}
           </button>
           <button
             className={page === 'audit' ? 'nav-item active' : 'nav-item'}
-            onClick={() => {
-              if (!adminUser) setShowLoginModal(true)
-              setPage('audit')
-            }}
+            onClick={() => goTo('audit')}
           >
             <History size={17} />
             Audit Logs
-            {!adminUser && <small style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.6 }}>Restricted</small>}
+            {!adminUser && <small className="nav-restricted-tag">Restricted</small>}
           </button>
         </nav>
 
@@ -912,7 +1080,7 @@ export default function App() {
           <div className="sidebar-theme-quick-bar near-sla">
             <div className="sidebar-theme-header">
               <span>Theme Selector</span>
-              <button type="button" onClick={() => setShowSettingsModal(true)} title="Open Full Settings & Profile Modal">
+              <button type="button" onClick={() => openSettingsModal()} title="Open Full Settings & Profile Modal">
                 <Palette size={11} />
                 <span>Settings</span>
               </button>
@@ -978,6 +1146,10 @@ export default function App() {
             <ChevronRight size={14} />
             <strong>
               {page === 'operations' && 'Campus Grievance Operations Hub'}
+              {page === 'twin' && 'Campus Digital Twin'}
+              {page === 'warroom' && 'War Room — Campus Command Center'}
+              {page === 'future' && 'Future Engine'}
+              {page === 'agent' && 'KAIROS AI Assistant'}
               {page === 'analytics' && 'Executive Operational Analytics'}
               {page === 'audit' && 'System Audit Trail & Cryptographic Logs'}
               {page === 'report' && 'Submit or Track Campus Grievance'}
@@ -986,23 +1158,22 @@ export default function App() {
 
           <div className="topbar-actions">
             {adminUser ? (
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div className="admin-status-group">
                 <div className="admin-status-pill">
                   <ShieldCheck size={13} />
                   <span>Admin: {adminUser.name}</span>
                 </div>
                 <button
-                  className="view-toggle-btn"
-                  onClick={() => setShowLoginModal(true)}
+                  className="view-toggle-btn view-toggle-btn-sm"
+                  onClick={() => openLoginModal()}
                   title="Change Password"
-                  style={{ padding: '5px 9px', fontSize: '11px' }}
                 >
                   <KeyRound size={11} />
                   Security
                 </button>
               </div>
             ) : (
-              <button className="primary-button admin-login-top-btn" onClick={() => setShowLoginModal(true)}>
+              <button className="primary-button admin-login-top-btn" onClick={() => openLoginModal()}>
                 <KeyRound size={13} />
                 Admin Portal Login
               </button>
@@ -1011,9 +1182,8 @@ export default function App() {
             <a
               href="/KAIROS_Complete_Product_and_Technical_Documentation.pdf"
               download="KAIROS_Complete_Product_and_Technical_Documentation.pdf"
-              className="view-toggle-btn"
+              className="view-toggle-btn pdf-docs-link"
               title="Download Complete KAIROS Master PRD & TRD PDF"
-              style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px' }}
             >
               <Download size={13} />
               <span>PDF Docs</span>
@@ -1021,11 +1191,20 @@ export default function App() {
 
             <button
               className="icon-button alert-btn"
-              onClick={() => showNotice(`${metrics.critical_action} critical incidents require immediate response`)}
+              onClick={() => {
+                if (reporterAwaiting > 0) {
+                  setTicketConfirmation(null)
+                  setPage('report')
+                  showNotice(`${reporterAwaiting} of your reported issue${reporterAwaiting === 1 ? ' is' : 's are'} waiting for your verification`)
+                } else {
+                  showNotice(`${metrics.critical_action} critical incidents require immediate response`)
+                }
+              }}
               title="Active Alerts"
+              aria-label={reporterAwaiting > 0 ? `${reporterAwaiting} resolution${reporterAwaiting === 1 ? '' : 's'} awaiting your verification` : `Active alerts: ${metrics.critical_action} critical incidents`}
             >
               <Bell size={16} />
-              {metrics.critical_action > 0 && <i />}
+              {(metrics.critical_action > 0 || reporterAwaiting > 0) && <i />}
             </button>
           </div>
         </header>
@@ -1039,25 +1218,81 @@ export default function App() {
         />
 
         {/* Page Routing */}
-        {page === 'analytics' ? (
+        {page === 'warroom' || page === 'future' ? (
           <div className="content">
             {!adminUser ? (
-              <div className="detail-panel-3d" style={{ maxWidth: '640px', margin: '40px auto', textAlign: 'center', padding: '40px' }}>
-                <ShieldAlert size={44} style={{ margin: '0 auto 16px', opacity: 0.8 }} />
-                <h2>Administrator Access Required</h2>
-                <p style={{ color: '#888', margin: '12px 0 24px', lineHeight: 1.6 }}>
-                  Campus Pulse executive operational analytics and workload heatmaps are strictly restricted to authenticated administrators.
-                </p>
-                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-                  <button className="primary-button" onClick={() => setShowLoginModal(true)}>
-                    <KeyRound size={14} />
-                    Sign In as Administrator
-                  </button>
-                  <button className="btn-cancel" onClick={() => setPage('report')}>
-                    Submit Grievance
-                  </button>
+              <AccessGate
+                description="The War Room and Future Engine surface campus-wide risk intelligence and can trigger operational actions, so they are restricted to authenticated administrators."
+                onSignIn={() => openLoginModal()}
+                onBack={() => setPage('report')}
+              />
+            ) : (
+              <Suspense fallback={<div className="skeleton twin-loading-skeleton" />}>
+                {page === 'warroom' ? (
+                  <WarRoom
+                    adminToken={adminToken}
+                    onOpenSignal={openFutureSignal}
+                    onOpenTwin={openTwinFromWarRoom}
+                    onOpenTicket={openTicketInOps}
+                    onSessionExpired={handleSessionExpired}
+                    onNotice={showNotice}
+                  />
+                ) : (
+                  <FutureEngine
+                    adminToken={adminToken}
+                    initialSignalId={futureSignalId}
+                    onSessionExpired={handleSessionExpired}
+                    onNotice={showNotice}
+                  />
+                )}
+              </Suspense>
+            )}
+          </div>
+        ) : page === 'agent' ? (
+          <div className="content">
+            <KairosAgent
+              adminToken={adminToken}
+              adminUser={adminUser}
+              onSessionExpired={handleSessionExpired}
+              onRequestLogin={openLoginModal}
+            />
+          </div>
+        ) : page === 'twin' ? (
+          <div className="content">
+            {!adminUser ? (
+              <AccessGate
+                description="The spatial Campus Digital Twin visualizes live grievance hotspots across every sector and is restricted to authenticated administrators."
+                onSignIn={() => openLoginModal()}
+                onBack={() => setPage('report')}
+              />
+            ) : (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <p className="eyebrow">Spatial Operations</p>
+                    <h1>Campus Digital Twin</h1>
+                    <p>Live 3D visualization of grievance density, severity, and dispatch coverage across campus sectors.</p>
+                  </div>
                 </div>
-              </div>
+                <Suspense fallback={<div className="skeleton twin-loading-skeleton" />}>
+                  <CampusDigitalTwin3D
+                    tickets={tickets}
+                    selectedLocation={filters.location}
+                    onSelectLocation={handleTwinSelectLocation}
+                    onQuickDispatch={handleTwinQuickDispatch}
+                  />
+                </Suspense>
+              </>
+            )}
+          </div>
+        ) : page === 'analytics' ? (
+          <div className="content">
+            {!adminUser ? (
+              <AccessGate
+                description="Campus Pulse executive operational analytics and workload heatmaps are strictly restricted to authenticated administrators."
+                onSignIn={() => openLoginModal()}
+                onBack={() => setPage('report')}
+              />
             ) : (
               <AnalyticsStudio tickets={tickets} analytics={analytics} onExportData={() => {}} />
             )}
@@ -1065,22 +1300,11 @@ export default function App() {
         ) : page === 'audit' ? (
           <div className="content">
             {!adminUser ? (
-              <div className="detail-panel-3d" style={{ maxWidth: '640px', margin: '40px auto', textAlign: 'center', padding: '40px' }}>
-                <ShieldAlert size={44} style={{ margin: '0 auto 16px', opacity: 0.8 }} />
-                <h2>Administrator Access Required</h2>
-                <p style={{ color: '#888', margin: '12px 0 24px', lineHeight: 1.6 }}>
-                  The cryptographic audit log stream and tamper-evident event timeline are restricted to authorized university administrators.
-                </p>
-                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-                  <button className="primary-button" onClick={() => setShowLoginModal(true)}>
-                    <KeyRound size={14} />
-                    Sign In as Administrator
-                  </button>
-                  <button className="btn-cancel" onClick={() => setPage('report')}>
-                    Submit Grievance
-                  </button>
-                </div>
-              </div>
+              <AccessGate
+                description="The cryptographic audit log stream and tamper-evident event timeline are restricted to authorized university administrators."
+                onSignIn={() => openLoginModal()}
+                onBack={() => setPage('report')}
+              />
             ) : (
               <AuditExplorer onRefresh={fetchTickets} adminToken={adminToken} />
             )}
@@ -1088,22 +1312,11 @@ export default function App() {
         ) : page === 'operations' ? (
           <div className="content">
             {!adminUser ? (
-              <div className="detail-panel-3d" style={{ maxWidth: '640px', margin: '40px auto', textAlign: 'center', padding: '40px' }}>
-                <ShieldAlert size={44} style={{ margin: '0 auto 16px', opacity: 0.8 }} />
-                <h2>Administrator Access Required</h2>
-                <p style={{ color: '#888', margin: '12px 0 24px', lineHeight: 1.6 }}>
-                  The Campus Grievance Operations Hub allows changing ticket priorities, dispatching field technicians, and updating SLA states. Please sign in with administrator credentials.
-                </p>
-                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-                  <button className="primary-button" onClick={() => setShowLoginModal(true)}>
-                    <KeyRound size={14} />
-                    Sign In as Administrator
-                  </button>
-                  <button className="btn-cancel" onClick={() => setPage('report')}>
-                    Submit or Track Grievance
-                  </button>
-                </div>
-              </div>
+              <AccessGate
+                description="The Campus Grievance Operations Hub allows changing ticket priorities, dispatching field technicians, and updating SLA states. Please sign in with administrator credentials."
+                onSignIn={() => openLoginModal()}
+                onBack={() => setPage('report')}
+              />
             ) : (
               <>
             {/* Page Header */}
@@ -1123,50 +1336,58 @@ export default function App() {
             </div>
 
             {/* Metrics Row (Clean 2D Cards) */}
-            <div className="metrics-3d-grid">
-              <div className="metric">
-                <span className="metric-icon">
-                  <Activity size={22} />
-                </span>
-                <div>
-                  <small>Active Open Tickets</small>
-                  <strong>{metrics.open_tickets}</strong>
-                  <p>Campus backlog</p>
+            <div className="metrics-3d-grid stagger-in">
+              <Card3D className="metric-card-wrap">
+                <div className="metric">
+                  <span className="metric-icon">
+                    <Activity size={22} />
+                  </span>
+                  <div>
+                    <small>Active Open Tickets</small>
+                    <strong>{metrics.open_tickets}</strong>
+                    <p>Campus backlog</p>
+                  </div>
                 </div>
-              </div>
+              </Card3D>
 
-              <div className="metric">
-                <span className="metric-icon">
-                  <ShieldAlert size={22} />
-                </span>
-                <div>
-                  <small>Critical Actions</small>
-                  <strong>{metrics.critical_action}</strong>
-                  <p>Immediate 2h SLA</p>
+              <Card3D className="metric-card-wrap">
+                <div className="metric">
+                  <span className="metric-icon">
+                    <ShieldAlert size={22} />
+                  </span>
+                  <div>
+                    <small>Critical Actions</small>
+                    <strong>{metrics.critical_action}</strong>
+                    <p>Immediate 2h SLA</p>
+                  </div>
                 </div>
-              </div>
+              </Card3D>
 
-              <div className="metric">
-                <span className="metric-icon">
-                  <Clock3 size={22} />
-                </span>
-                <div>
-                  <small>SLA Warnings</small>
-                  <strong>{metrics.sla_breached}</strong>
-                  <p>Target exceeded</p>
+              <Card3D className="metric-card-wrap">
+                <div className="metric">
+                  <span className="metric-icon">
+                    <Clock3 size={22} />
+                  </span>
+                  <div>
+                    <small>SLA Warnings</small>
+                    <strong>{metrics.sla_breached}</strong>
+                    <p>Target exceeded</p>
+                  </div>
                 </div>
-              </div>
+              </Card3D>
 
-              <div className="metric">
-                <span className="metric-icon">
-                  <CheckCircle2 size={22} />
-                </span>
-                <div>
-                  <small>Resolved Tickets</small>
-                  <strong>{metrics.resolved_today}</strong>
-                  <p>Closed incidents</p>
+              <Card3D className="metric-card-wrap">
+                <div className="metric">
+                  <span className="metric-icon">
+                    <CheckCircle2 size={22} />
+                  </span>
+                  <div>
+                    <small>Resolved Tickets</small>
+                    <strong>{metrics.resolved_today}</strong>
+                    <p>Closed incidents</p>
+                  </div>
                 </div>
-              </div>
+              </Card3D>
             </div>
 
             {/* Bulk Actions Floating Toolbar (When items selected) */}
@@ -1215,11 +1436,12 @@ export default function App() {
                     <input
                       type="text"
                       placeholder="Search title, ID, room..."
+                      aria-label="Search grievance queue"
                       value={filters.search}
                       onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
                     />
                     {filters.search && (
-                      <button onClick={() => setFilters((prev) => ({ ...prev, search: '' }))}>
+                      <button onClick={() => setFilters((prev) => ({ ...prev, search: '' }))} aria-label="Clear search">
                         <X size={13} />
                       </button>
                     )}
@@ -1277,7 +1499,7 @@ export default function App() {
                 </div>
 
                 {/* Ticket Rows Stream */}
-                <div className="ticket-list-3d">
+                <div className="ticket-list-3d stagger-in">
                   {shown.length === 0 ? (
                     <div className="empty-state">
                       <p>No complaints reported yet.</p>
@@ -1392,6 +1614,15 @@ export default function App() {
                     </div>
                   )}
 
+                  <ResolutionProof
+                    ticketId={selected.id}
+                    status={selected.status}
+                    adminToken={adminToken}
+                    mode="admin"
+                    onNotice={showNotice}
+                    onChanged={fetchTickets}
+                  />
+
                   {/* Human-in-the-Loop Operations Controls */}
                   <div className="owner-section-3d">
                     <div className="control-group">
@@ -1483,43 +1714,101 @@ export default function App() {
         ) : (
           /* Report Complaint Page & Public Student Tracker */
           <div className="content report-page">
-            {adminUser && (
+            {adminUser && !ticketConfirmation && (
               <button className="back-btn-3d" onClick={() => setPage('operations')}>
                 &larr; Back to Operations Hub
               </button>
             )}
 
-            {/* Public Ticket Tracker Card */}
-            <div className="detail-panel-3d" style={{ marginBottom: '24px', padding: '24px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <Search size={16} />
-                <h3 style={{ margin: 0, fontSize: '15px' }}>Track Existing Grievance Status</h3>
+            {ticketConfirmation ? (
+              <div className="confirmation-3d">
+                <div className="confirmation-icon">
+                  <CheckCircle2 size={40} />
+                </div>
+                <p className="eyebrow">Grievance Submitted</p>
+                <h1 className="confirmation-id">{ticketConfirmation.id}</h1>
+                <p className="confirmation-title">{ticketConfirmation.title}</p>
+                {ticketConfirmation.reporter_token && (
+                  <p className="confirmation-note">When the team marks this resolved, KAIROS will ask <strong>you</strong> to confirm it was actually fixed — right here on this device.</p>
+                )}
+
+                <div className="confirmation-grid">
+                  <div className="confirmation-stat">
+                    <small>Status</small>
+                    <Tag type="status">{ticketConfirmation.status}</Tag>
+                  </div>
+                  <div className="confirmation-stat">
+                    <small>Priority</small>
+                    <Tag type="priority">{ticketConfirmation.priority}</Tag>
+                  </div>
+                  <div className="confirmation-stat">
+                    <small>Department</small>
+                    <strong>{ticketConfirmation.department}</strong>
+                  </div>
+                  <div className="confirmation-stat">
+                    <small>SLA Target</small>
+                    <strong>{ticketConfirmation.due || `${ticketConfirmation.sla_hours}h`}</strong>
+                  </div>
+                </div>
+
+                <NeuralPipeline3D currentStep={4} triageData={{ ...ticketConfirmation, recommended_action: ticketConfirmation.action }} />
+
+                <div className="confirmation-actions">
+                  <button
+                    className="primary-button"
+                    onClick={() => {
+                      setTrackIdInput(ticketConfirmation.id)
+                      setTrackedTicket(ticketConfirmation)
+                      setTicketConfirmation(null)
+                    }}
+                  >
+                    <Search size={14} />
+                    Track This Ticket
+                  </button>
+                  <button className="btn-cancel" onClick={() => setTicketConfirmation(null)}>
+                    <Plus size={14} />
+                    Submit Another Grievance
+                  </button>
+                  {adminUser && (
+                    <button className="view-toggle-btn" onClick={() => { setTicketConfirmation(null); setPage('operations') }}>
+                      <LayoutDashboard size={14} />
+                      Go to Operations Hub
+                    </button>
+                  )}
+                </div>
               </div>
-              <p style={{ color: '#888', fontSize: '13px', margin: '0 0 16px' }}>
+            ) : (
+              <>
+
+            <ReporterCenter
+              onAwaitingChange={setReporterAwaiting}
+              onNotice={showNotice}
+              onTrack={(id) => handleTrackTicket(null, id)}
+            />
+
+            {/* Public Ticket Tracker Card */}
+            <div className="detail-panel-3d tracker-card">
+              <div className="tracker-header">
+                <Search size={16} />
+                <h3>Track Existing Grievance Status</h3>
+              </div>
+              <p className="tracker-subtext">
                 Students and complainants can look up any ticket in real time without creating an account.
               </p>
 
-              <form onSubmit={handleTrackTicket} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <form onSubmit={handleTrackTicket} className="tracker-form">
                 <input
                   type="text"
+                  className="tracker-input"
                   placeholder="Enter Ticket ID (e.g. GRV-1050)"
                   value={trackIdInput}
                   onChange={(e) => setTrackIdInput(e.target.value)}
-                  style={{
-                    flex: '1 1 240px',
-                    padding: '10px 14px',
-                    background: '#0d0d0d',
-                    border: '1px solid #333',
-                    color: '#fff',
-                    borderRadius: '6px',
-                    fontSize: '13px'
-                  }}
+                  aria-label="Ticket ID"
                 />
                 <button
                   type="submit"
                   className="primary-button"
                   disabled={trackLoading || !trackIdInput.trim()}
-                  style={{ padding: '10px 18px' }}
                 >
                   <Search size={14} />
                   {trackLoading ? 'Searching...' : 'Track Ticket'}
@@ -1535,46 +1824,61 @@ export default function App() {
                 )}
               </form>
 
+              {trackLoading && (
+                <div className="tracker-skeleton">
+                  <div className="skeleton" style={{ height: 18, width: '40%' }} />
+                  <div className="skeleton" style={{ height: 14, width: '70%', marginTop: 10 }} />
+                  <div className="skeleton" style={{ height: 60, width: '100%', marginTop: 12 }} />
+                </div>
+              )}
+
               {trackError && (
-                <div className="auth-error-banner" style={{ marginTop: '14px' }}>
+                <div className="auth-error-banner tracker-error">
                   {trackError}
                 </div>
               )}
 
               {trackedTicket && (
-                <div style={{ marginTop: '20px', borderTop: '1px solid #222', paddingTop: '16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '14px' }}>{trackedTicket.id}</span>
+                <div className="tracker-result">
+                  <div className="tracker-result-header">
+                    <div className="tracker-result-id">
+                      <span className="tracker-ticket-id">{trackedTicket.id}</span>
                       <Tag type="status">{trackedTicket.status}</Tag>
                       <Tag type="priority">{trackedTicket.priority}</Tag>
                     </div>
-                    <small style={{ color: trackedTicket.is_breached ? '#ff4d4d' : '#aaa' }}>
-                      <Clock3 size={11} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+                    <small className={trackedTicket.is_breached ? 'breach-text' : 'tracker-due'}>
+                      <Clock3 size={11} />
                       {trackedTicket.due}
                     </small>
                   </div>
 
-                  <h4 style={{ margin: '12px 0 6px', fontSize: '15px' }}>{trackedTicket.title}</h4>
-                  <p style={{ color: '#aaa', fontSize: '13px', margin: '0 0 10px' }}>
-                    <MapPin size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+                  <h4 className="tracker-title">{trackedTicket.title}</h4>
+                  <p className="tracker-meta-line">
+                    <MapPin size={12} />
                     {trackedTicket.location} &bull; Routed to: <strong>{trackedTicket.department}</strong>
                   </p>
 
-                  <div style={{ background: '#0a0a0a', border: '1px solid #222', borderRadius: '6px', padding: '12px', margin: '12px 0' }}>
-                    <small style={{ color: '#888', display: 'block', marginBottom: '4px' }}>Operational Diagnosis:</small>
-                    <p style={{ margin: 0, fontSize: '13px', color: '#ddd' }}>{trackedTicket.summary}</p>
+                  <ResolutionProof ticketId={trackedTicket.id} status={trackedTicket.status} mode="public" onNotice={showNotice} />
+
+                  <div className="tracker-diagnosis-box">
+                    <small>Operational Diagnosis:</small>
+                    <p>{trackedTicket.summary}</p>
                   </div>
 
                   {trackedTicket.activity && trackedTicket.activity.length > 0 && (
-                    <div style={{ marginTop: '14px' }}>
-                      <small style={{ color: '#888', fontWeight: 600 }}>Public Audit Timeline:</small>
-                      <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div className="timeline-3d tracker-timeline">
+                      <h3>
+                        <History size={13} />
+                        Public Audit Timeline
+                      </h3>
+                      <div className="timeline-items">
                         {trackedTicket.activity.map((act, i) => (
-                          <div key={act.id || i} style={{ fontSize: '12px', color: '#bbb', display: 'flex', gap: '8px' }}>
-                            <span style={{ color: '#666', whiteSpace: 'nowrap' }}>{act.created_at}</span>
-                            <span>&bull;</span>
-                            <span>{act.action}</span>
+                          <div key={act.id || i} className="timeline-item-3d">
+                            <i />
+                            <div>
+                              <small>{act.created_at}</small>
+                              <p>{act.action}</p>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1665,17 +1969,22 @@ export default function App() {
                   />
                 </label>
 
-                <div style={{ marginTop: '16px' }}>
+                <div className="photo-upload-block">
                   <label>Inspection Photo (Optional):</label>
                   {preview ? (
                     <div className="preview-3d">
                       <img src={preview} alt="Preview" />
-                      <button type="button" onClick={() => setPreview('')}>
+                      <button type="button" onClick={() => setPreview('')} aria-label="Remove attached photo">
                         <X size={14} />
                       </button>
                     </div>
                   ) : (
-                    <label className="upload-3d">
+                    <label
+                      className={`upload-3d${isDraggingPhoto ? ' dragging' : ''}`}
+                      onDragOver={(e) => { e.preventDefault(); setIsDraggingPhoto(true) }}
+                      onDragLeave={() => setIsDraggingPhoto(false)}
+                      onDrop={handlePhotoDrop}
+                    >
                       <FileImage size={24} />
                       <strong>Click or Drag Photo to Attach</strong>
                       <span>Supports PNG, JPEG, WebP (Max 5MB)</span>
@@ -1684,7 +1993,7 @@ export default function App() {
                   )}
                 </div>
 
-                <div style={{ marginTop: '16px', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                <div className="triage-actions-row">
                   <button
                     type="button"
                     className="view-toggle-btn"
@@ -1704,6 +2013,10 @@ export default function App() {
                     {showManualSection ? 'Hide Classification Details' : '✎ Enter / Edit Classification Manually'}
                   </button>
                 </div>
+
+                {triageStep > 0 && (
+                  <NeuralPipeline3D currentStep={triageStep} triageData={triageStep >= 2 ? triagePreview : null} />
+                )}
               </div>
 
               {/* Step 3: Classification & Operational Specifications (Manual or AI) */}
@@ -1845,6 +2158,8 @@ export default function App() {
                 </button>
               </div>
             </form>
+              </>
+            )}
           </div>
         )}
       </div>

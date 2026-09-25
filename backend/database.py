@@ -18,22 +18,25 @@ _LEGACY_SQLITE = os.path.join(os.path.dirname(__file__), "resolveai.db")
 SQLITE_PATH = _LEGACY_SQLITE if os.path.exists(_LEGACY_SQLITE) and not os.path.exists(_DEFAULT_SQLITE) else _DEFAULT_SQLITE
 
 _ACTIVE_ENGINE = None
+_PG_RETRY_AFTER = 0.0  # after a failed PostgreSQL connect, skip it briefly instead of paying the timeout on every request
+_PG_BACKOFF_SECONDS = 60
 
 def get_connection():
     """
     Returns a tuple (connection, engine_type) where engine_type is 'postgresql' or 'sqlite'.
     Prefers PostgreSQL 18 on 127.0.0.1:5432, falling back to SQLite if PostgreSQL is unavailable.
     """
-    global _ACTIVE_ENGINE
-    if PSYCOPG2_AVAILABLE:
+    global _ACTIVE_ENGINE, _PG_RETRY_AFTER
+    import time as _time
+    if PSYCOPG2_AVAILABLE and _time.time() >= _PG_RETRY_AFTER:
         try:
             conn = psycopg2.connect(PG_URL, connect_timeout=3)
             conn.autocommit = False
             _ACTIVE_ENGINE = "postgresql"
+            _PG_RETRY_AFTER = 0.0
             return conn, "postgresql"
-        except Exception as e:
-            # Fall back to SQLite
-            pass
+        except Exception:
+            _PG_RETRY_AFTER = _time.time() + _PG_BACKOFF_SECONDS
 
     conn = sqlite3.connect(SQLITE_PATH)
     conn.row_factory = sqlite3.Row
@@ -267,7 +270,7 @@ def calculate_sla_status(created_at_str: str, sla_hours: int, status: str, resol
         
         if status in ["Resolved", "Closed"]:
             if resolved_at:
-                return f"Resolved ({resolved_at})", False
+                return (f"Resolved {format_relative_time(resolved_at).lower()}" if "T" in str(resolved_at) else f"Resolved ({resolved_at})"), False
             return "Resolved", False
             
         remaining_seconds = (due_at - now).total_seconds()
