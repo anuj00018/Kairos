@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://kairos-backend-3mog.onrender.com/api/$1"
+      "destination": "https://kairos01.onrender.com/api/$1"
     },
     {
       "source": "/(.*)",
