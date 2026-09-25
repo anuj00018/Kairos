@@ -131,6 +131,29 @@ export default function SettingsModal({ isOpen, onClose, currentTheme, onSelectT
             </div>
           </div>
 
+          {/* Documentation & Downloads Section */}
+          <div className="settings-section">
+            <div className="settings-section-header">
+              <Database size={14} />
+              <h4>Official Platform Documentation</h4>
+              <span className="section-badge" style={{ background: 'rgba(37,99,235,0.15)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)' }}>PDF Available</span>
+            </div>
+            <div style={{ marginTop: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <strong style={{ fontSize: '13px', display: 'block', marginBottom: '2px' }}>KAIROS Master PRD & TRD Specification</strong>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Complete 400KB+ PDF with product details, architecture, data contracts & security models</span>
+              </div>
+              <a
+                href="/KAIROS_Complete_Product_and_Technical_Documentation.pdf"
+                download="KAIROS_Complete_Product_and_Technical_Documentation.pdf"
+                className="primary-button"
+                style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '6px 12px' }}
+              >
+                <span>Download PDF</span>
+              </a>
+            </div>
+          </div>
+
           {/* Database / Operational Status */}
           <div className="settings-section">
             <div className="settings-section-header">

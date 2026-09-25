@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "backend:dev": "python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload",
+    "backend:start": "python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000",
     "db:start": "node start_postgres.cjs",
     "build": "vite build",
     "lint": "oxlint",

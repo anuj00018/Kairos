@@ -1008,6 +1008,17 @@ export default function App() {
               </button>
             )}
 
+            <a
+              href="/KAIROS_Complete_Product_and_Technical_Documentation.pdf"
+              download="KAIROS_Complete_Product_and_Technical_Documentation.pdf"
+              className="view-toggle-btn"
+              title="Download Complete KAIROS Master PRD & TRD PDF"
+              style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px' }}
+            >
+              <Download size={13} />
+              <span>PDF Docs</span>
+            </a>
+
             <button
               className="icon-button alert-btn"
               onClick={() => showNotice(`${metrics.critical_action} critical incidents require immediate response`)}

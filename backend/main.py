@@ -91,8 +91,16 @@ allowed_origins = [
     FRONTEND_URL,
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
     "http://localhost:4173",
     "http://127.0.0.1:4173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ] + extra_origins
 
 # Remove duplicates while preserving order
@@ -458,4 +466,23 @@ def download_project_zip():
         filename="KAIROS-Project.zip",
         media_type="application/zip"
     )
+
+@app.get("/api/download/pdf")
+def download_pdf():
+    file_path = Path(__file__).resolve().parent.parent.parent / "KAIROS_Complete_Product_and_Technical_Documentation.pdf"
+    if not file_path.exists():
+        file_path = Path(__file__).resolve().parent.parent / "public" / "KAIROS_Complete_Product_and_Technical_Documentation.pdf"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="KAIROS PDF documentation not found")
+    return FileResponse(
+        path=file_path,
+        filename="KAIROS_Complete_Product_and_Technical_Documentation.pdf",
+        media_type="application/pdf"
+    )
+
+if __name__ == "__main__":
+    import uvicorn
+    server_port = int(os.environ.get("PORT", os.environ.get("BACKEND_PORT", 8000)))
+    uvicorn.run("backend.main:app", host="127.0.0.1", port=server_port, reload=True)
+
 
