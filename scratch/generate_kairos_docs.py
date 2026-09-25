@@ -1354,3 +1354,4 @@ npm run dev</code></pre>
 
 if __name__ == "__main__":
     generate_pdf()
+

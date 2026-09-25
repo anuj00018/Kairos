@@ -58,3 +58,4 @@ export default function Card3D({ children, className = '', maxTilt = 8, scale = 
     </div>
   )
 }
+

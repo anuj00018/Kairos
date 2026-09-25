@@ -860,3 +860,4 @@ def get_analytics_data() -> Dict[str, Any]:
         "total_tickets": total
     }
 
+

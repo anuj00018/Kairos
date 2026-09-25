@@ -175,3 +175,4 @@ Every component of ResolveAI was selected intentionally for high performance, ze
 | **Accountability** | None (lost in inboxes / chat groups) | **Strict SLA Timers + SHA-256 Audit Trails** |
 | **Complainant Feedback**| Zero visibility into progress | **Instant ID lookup & live timeline tracking** |
 | **Systemic Prevention** | Reactive (patch the same leak repeatedly) | **Predictive Hotspots & Facility Health Matrix** |
+

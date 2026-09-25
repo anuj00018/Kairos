@@ -195,3 +195,4 @@ async def triage_grievance(description: str, location: str, image: Optional[str]
     req = TriageRequest(description=description, location=location, image=image)
     return await perform_ai_triage(req)
 
+

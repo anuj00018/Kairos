@@ -275,3 +275,4 @@ class AnalyticsResponse(BaseModel):
     total_tickets: int
 
 
+

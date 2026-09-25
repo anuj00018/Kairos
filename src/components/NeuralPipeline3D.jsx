@@ -70,3 +70,4 @@ export default function NeuralPipeline3D({ currentStep = 2, triageData = null })
     </div>
   )
 }
+

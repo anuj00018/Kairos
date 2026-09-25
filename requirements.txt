@@ -7,3 +7,4 @@ python-jose[cryptography]>=3.5.0
 bcrypt>=4.3.0
 slowapi>=0.1.9
 python-multipart>=0.0.32
+

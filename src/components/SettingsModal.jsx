@@ -187,3 +187,4 @@ export default function SettingsModal({ isOpen, onClose, currentTheme, onSelectT
     </div>
   )
 }
+

@@ -52,3 +52,4 @@ with urllib.request.urlopen('http://127.0.0.1:8000/api/audit-logs?limit=100') as
         print(f'  Ticket {tid} (Total Events: {len(acts)}):')
         for a in acts:
             print(f'    * {a}')
+
